@@ -108,6 +108,25 @@ class BookingService:
             return "Не вдалося створити бронювання в календарі. Можемо спробувати ще раз."
         return "I could not create the booking in the calendar. We can try again."
 
+    def _serialize_pending_start_dt(self, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=self.timezone)
+        return value.isoformat()
+
+    def _deserialize_pending_start_dt(self, value: Any) -> datetime:
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=self.timezone)
+            return value.astimezone(self.timezone)
+
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=self.timezone)
+            return parsed.astimezone(self.timezone)
+
+        raise ValueError(f"Unsupported pending start_dt type: {type(value)!r}")
+
     def _parse_requested_datetime(self, text: str) -> datetime | None:
         now = datetime.now(self.timezone)
         normalized = text.strip().lower()
@@ -168,33 +187,11 @@ class BookingService:
 
         return None
 
-    def _serialize_pending_start_dt(self, value: datetime) -> str:
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=self.timezone)
-        return value.isoformat()
-
-    def _deserialize_pending_start_dt(self, value: Any) -> datetime:
-        if isinstance(value, datetime):
-            if value.tzinfo is None:
-                return value.replace(tzinfo=self.timezone)
-            return value.astimezone(self.timezone)
-
-        if isinstance(value, str):
-            parsed = datetime.fromisoformat(value)
-            if parsed.tzinfo is None:
-                return parsed.replace(tzinfo=self.timezone)
-            return parsed.astimezone(self.timezone)
-
-        raise ValueError(f"Unsupported pending start_dt type: {type(value)!r}")
-
     def handle_booking_request(self, sender_id: str, message_text: str) -> Dict[str, Any]:
         language = self._detect_language(message_text)
-
-        logger.info("booking intent detected sender_id=%s text=%r", sender_id, message_text)
-
         requested_dt = self._parse_requested_datetime(message_text)
 
-        logger.info("booking parsed datetime sender_id=%s parsed_dt=%s", sender_id, requested_dt)
+        logger.info("booking request sender_id=%s text=%r parsed_dt=%s", sender_id, message_text, requested_dt)
 
         if requested_dt is None:
             return {
@@ -204,12 +201,8 @@ class BookingService:
                 "start_dt": None,
             }
 
-        logger.info(
-            "booking availability check start sender_id=%s start_dt=%s duration_minutes=%s",
-            sender_id,
-            requested_dt.isoformat(),
-            30,
-        )
+        # New booking request should replace any old pending confirmation.
+        self._clear_pending_confirmation(sender_id)
 
         is_available = self.calendar_service.check_specific_time_availability(
             start_dt=requested_dt,
@@ -217,7 +210,7 @@ class BookingService:
         )
 
         logger.info(
-            "booking availability check result sender_id=%s start_dt=%s is_available=%s",
+            "booking availability sender_id=%s start_dt=%s is_available=%s",
             sender_id,
             requested_dt.isoformat(),
             is_available,
@@ -231,20 +224,15 @@ class BookingService:
                 "start_dt": requested_dt.isoformat(),
             }
 
-        pending_data = {
-            "start_dt": self._serialize_pending_start_dt(requested_dt),
-            "language": language,
-            "duration_minutes": 30,
-            "summary": "Consultation call",
-            "description": f"Booked via Flowly Meta Bot. Sender ID: {sender_id}",
-        }
-
-        self._save_pending_confirmation(sender_id, pending_data)
-
-        logger.info(
-            "booking confirmation requested sender_id=%s start_dt=%s",
+        self._save_pending_confirmation(
             sender_id,
-            pending_data["start_dt"],
+            {
+                "start_dt": self._serialize_pending_start_dt(requested_dt),
+                "language": language,
+                "duration_minutes": 30,
+                "summary": "Consultation call",
+                "description": f"Booked via Flowly Meta Bot. Sender ID: {sender_id}",
+            },
         )
 
         return {
@@ -263,7 +251,6 @@ class BookingService:
 
         if self._is_rejection(message_text):
             self._clear_pending_confirmation(sender_id)
-            logger.info("booking confirmation rejected sender_id=%s", sender_id)
             return {
                 "status": "cancelled",
                 "reply_text": self._build_cancelled_reply(language),
@@ -277,8 +264,6 @@ class BookingService:
                 "event_created": False,
             }
 
-        logger.info("booking confirmation received sender_id=%s text=%r", sender_id, message_text)
-
         try:
             start_dt = self._deserialize_pending_start_dt(pending["start_dt"])
         except Exception:
@@ -287,18 +272,12 @@ class BookingService:
                 sender_id,
                 pending.get("start_dt"),
             )
+            self._clear_pending_confirmation(sender_id)
             return {
                 "status": "create_failed",
                 "reply_text": self._build_create_failed_reply(language),
                 "event_created": False,
             }
-
-        logger.info(
-            "booking create_event recheck availability sender_id=%s start_dt=%s duration_minutes=%s",
-            sender_id,
-            start_dt.isoformat(),
-            pending["duration_minutes"],
-        )
 
         try:
             still_available = self.calendar_service.check_specific_time_availability(
@@ -311,18 +290,12 @@ class BookingService:
                 sender_id,
                 start_dt.isoformat(),
             )
+            self._clear_pending_confirmation(sender_id)
             return {
                 "status": "create_failed",
                 "reply_text": self._build_create_failed_reply(language),
                 "event_created": False,
             }
-
-        logger.info(
-            "booking availability recheck result sender_id=%s start_dt=%s is_available=%s",
-            sender_id,
-            start_dt.isoformat(),
-            still_available,
-        )
 
         if not still_available:
             self._clear_pending_confirmation(sender_id)
@@ -333,24 +306,11 @@ class BookingService:
             }
 
         try:
-            logger.info(
-                "booking create_event start sender_id=%s start_dt=%s duration_minutes=%s summary=%r",
-                sender_id,
-                start_dt.isoformat(),
-                pending["duration_minutes"],
-                pending["summary"],
-            )
             created = self.calendar_service.create_booking_event(
                 start_dt=start_dt,
                 duration_minutes=pending["duration_minutes"],
                 summary=pending["summary"],
                 description=pending["description"],
-            )
-            logger.info(
-                "booking create_event success sender_id=%s event_id=%s event_link=%s",
-                sender_id,
-                created.event_id,
-                created.html_link,
             )
         except Exception:
             logger.exception(
@@ -359,6 +319,7 @@ class BookingService:
                 start_dt.isoformat(),
                 pending,
             )
+            self._clear_pending_confirmation(sender_id)
             return {
                 "status": "create_failed",
                 "reply_text": self._build_create_failed_reply(language),

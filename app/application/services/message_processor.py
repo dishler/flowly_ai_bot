@@ -28,29 +28,38 @@ class MessageProcessor:
         self.memory_service.add_user_message(message.sender_id, message.user_message)
 
         booking_result = None
+        reply_text = ""
+        intent = self.intent_service.detect_intent(message.user_message)
+        intent_value = intent.value
 
-        # 1. If we are waiting for confirmation, handle that first.
-        if self.booking_service.has_pending_confirmation(message.sender_id):
+        has_pending_confirmation = self.booking_service.has_pending_confirmation(message.sender_id)
+
+        # 1. If user sends a NEW booking request while pending confirmation exists,
+        # treat it as a fresh booking request instead of forcing confirmation flow.
+        if intent == IntentType.BOOKING_REQUEST:
+            booking_result = self.booking_service.handle_booking_request(
+                sender_id=message.sender_id,
+                message_text=message.user_message,
+            )
+            reply_text = booking_result["reply_text"]
+
+        # 2. If there is pending confirmation and this is not a new booking request,
+        # try confirmation / rejection flow.
+        elif has_pending_confirmation:
             booking_result = self.booking_service.handle_booking_confirmation(
                 sender_id=message.sender_id,
                 message_text=message.user_message,
             )
             intent_value = "booking_confirmation"
-            reply_text = booking_result["reply_text"]
 
-        else:
-            # 2. Normal intent detection flow.
-            intent = self.intent_service.detect_intent(message.user_message)
-            intent_value = intent.value
-
-            if intent == IntentType.BOOKING_REQUEST:
-                booking_result = self.booking_service.handle_booking_request(
-                    sender_id=message.sender_id,
-                    message_text=message.user_message,
-                )
+            if booking_result is not None:
                 reply_text = booking_result["reply_text"]
             else:
                 reply_text = self.reply_service.generate_reply(message)
+
+        # 3. Normal non-booking flow.
+        else:
+            reply_text = self.reply_service.generate_reply(message)
 
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
 
