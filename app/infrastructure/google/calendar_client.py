@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ from googleapiclient.errors import HttpError
 
 from app.core.config import settings
 
+
+logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
@@ -114,9 +117,43 @@ class GoogleCalendarClient:
                 "items": [{"id": self.calendar_id}],
             }
 
+            logger.info(
+                "calendar freebusy query calendar_id=%s time_min=%s time_max=%s body=%s",
+                self.calendar_id,
+                time_min.isoformat(),
+                time_max.isoformat(),
+                body,
+            )
+
             response = service.freebusy().query(body=body).execute()
+
+            logger.info(
+                "calendar freebusy raw response calendar_id=%s response=%s",
+                self.calendar_id,
+                response,
+            )
+
             calendar_data = response.get("calendars", {}).get(self.calendar_id, {})
+
+            if not calendar_data:
+                raise GoogleCalendarClientError(
+                    f"Freebusy returned no calendar data for calendar_id={self.calendar_id}"
+                )
+
+            calendar_errors = calendar_data.get("errors", [])
+            if calendar_errors:
+                raise GoogleCalendarClientError(
+                    f"Freebusy returned errors for calendar_id={self.calendar_id}: {calendar_errors}"
+                )
+
             busy_items = calendar_data.get("busy", [])
+
+            logger.info(
+                "calendar freebusy parsed calendar_id=%s busy_count=%s busy_items=%s",
+                self.calendar_id,
+                len(busy_items),
+                busy_items,
+            )
 
             result: list[CalendarSlot] = []
             for item in busy_items:
@@ -141,13 +178,41 @@ class GoogleCalendarClient:
         if end_dt <= start_dt:
             raise GoogleCalendarClientError("end_dt must be after start_dt")
 
+        logger.info(
+            "calendar availability check start calendar_id=%s start_dt=%s end_dt=%s",
+            self.calendar_id,
+            start_dt.isoformat(),
+            end_dt.isoformat(),
+        )
+
         busy_periods = self.get_busy_periods(start_dt, end_dt)
+
+        logger.info(
+            "calendar availability check busy_periods calendar_id=%s count=%s busy_periods=%s",
+            self.calendar_id,
+            len(busy_periods),
+            busy_periods,
+        )
 
         for busy in busy_periods:
             overlaps = start_dt < busy.end and end_dt > busy.start
             if overlaps:
+                logger.info(
+                    "calendar availability overlap detected calendar_id=%s start_dt=%s end_dt=%s busy_start=%s busy_end=%s",
+                    self.calendar_id,
+                    start_dt.isoformat(),
+                    end_dt.isoformat(),
+                    busy.start.isoformat(),
+                    busy.end.isoformat(),
+                )
                 return False
 
+        logger.info(
+            "calendar availability no overlap calendar_id=%s start_dt=%s end_dt=%s",
+            self.calendar_id,
+            start_dt.isoformat(),
+            end_dt.isoformat(),
+        )
         return True
 
     def create_event(
@@ -176,10 +241,26 @@ class GoogleCalendarClient:
                 },
             }
 
+            logger.info(
+                "calendar create_event start calendar_id=%s start_dt=%s end_dt=%s summary=%r",
+                self.calendar_id,
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+                summary,
+            )
+
             created = (
                 service.events()
                 .insert(calendarId=self.calendar_id, body=event_body)
                 .execute()
+            )
+
+            logger.info(
+                "calendar create_event success calendar_id=%s event_id=%s html_link=%s status=%s",
+                self.calendar_id,
+                created.get("id"),
+                created.get("htmlLink", ""),
+                created.get("status", "confirmed"),
             )
 
             return CreatedCalendarEvent(
@@ -196,4 +277,3 @@ class GoogleCalendarClient:
             raise GoogleCalendarClientError(
                 f"Unexpected Google Calendar create event error: {exc}"
             ) from exc
-            
