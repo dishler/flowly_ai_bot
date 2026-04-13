@@ -117,4 +117,4 @@ async def root() -> dict:
 
 
 app.include_router(health_router)
-app.include_router(meta_webhook_router)
+app.include_router(meta_webhook_router, prefix="/webhooks")
