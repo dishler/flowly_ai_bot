@@ -1,6 +1,9 @@
+from typing import Any, Optional
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from app.application.dto.normalized_message import NormalizedMessage
 from app.core.config import settings
 
 router = APIRouter(prefix="/webhooks", tags=["meta"])
@@ -21,8 +24,113 @@ async def verify_meta_webhook(
     return PlainTextResponse(content=hub_challenge, status_code=200)
 
 
+def _parse_facebook(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
+    entries = payload.get("entry", [])
+    if not entries:
+        return None
+
+    entry = entries[0]
+    messaging = entry.get("messaging", [])
+    if not messaging:
+        return None
+
+    event = messaging[0]
+    message = event.get("message", {})
+    text = message.get("text")
+    mid = message.get("mid")
+
+    sender_id = event.get("sender", {}).get("id")
+    recipient_id = event.get("recipient", {}).get("id")
+    timestamp = event.get("timestamp")
+
+    if not text or not sender_id or not recipient_id or not mid:
+        return None
+
+    return NormalizedMessage(
+        platform="facebook",
+        sender_id=str(sender_id),
+        recipient_id=str(recipient_id),
+        message_mid=str(mid),
+        user_message=str(text),
+        timestamp=timestamp,
+    )
+
+
+def _parse_instagram(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
+    entries = payload.get("entry", [])
+    if not entries:
+        return None
+
+    entry = entries[0]
+    changes = entry.get("changes", [])
+    if not changes:
+        return None
+
+    change = changes[0]
+    value = change.get("value", {})
+    messages = value.get("messages", [])
+    if not messages:
+        return None
+
+    message = messages[0]
+    text = message.get("text", {}).get("body")
+    mid = message.get("id")
+    sender_id = message.get("from")
+    recipient_id = value.get("metadata", {}).get(
+        "phone_number_id", "instagram-recipient"
+    )
+    timestamp_raw = message.get("timestamp")
+
+    if not text or not sender_id or not mid:
+        return None
+
+    timestamp = None
+    if timestamp_raw is not None:
+        try:
+            timestamp = int(timestamp_raw)
+        except (TypeError, ValueError):
+            timestamp = None
+
+    return NormalizedMessage(
+        platform="instagram",
+        sender_id=str(sender_id),
+        recipient_id=str(recipient_id),
+        message_mid=str(mid),
+        user_message=str(text),
+        timestamp=timestamp,
+    )
+
+
+def _parse_meta_payload(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
+    if payload.get("object") == "page":
+        return _parse_facebook(payload)
+
+    if payload.get("object") == "instagram":
+        return _parse_instagram(payload)
+
+    # Fallback: some IG payloads can still come under page-style containers
+    parsed = _parse_instagram(payload)
+    if parsed is not None:
+        return parsed
+
+    return _parse_facebook(payload)
+
+
 @router.post("/meta")
 async def receive_meta_webhook(request: Request):
     payload = await request.json()
-    # тут залиш свою поточну логіку обробки POST
-    return {"status": "accepted"}
+
+    message = _parse_meta_payload(payload)
+    if message is None:
+        # Non-message events or unsupported payload shape:
+        # acknowledge so Meta does not retry forever
+        return {"status": "ignored"}
+
+    result = request.app.state.message_processor.process(message)
+
+    return {
+        "status": "processed",
+        "platform": message.platform,
+        "message_mid": message.message_mid,
+        "outbound_result": result.get("outbound_result"),
+    }
