@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.routes.debug_booking import router as debug_booking_router
 from app.api.routes.health import router as health_router
 from app.api.routes.meta_webhook import router as meta_webhook_router
 from app.application.services.ai_service import AIService
@@ -118,3 +119,4 @@ async def root() -> dict:
 
 app.include_router(health_router)
 app.include_router(meta_webhook_router, prefix="/webhooks")
+app.include_router(debug_booking_router)
