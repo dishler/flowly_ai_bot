@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.core.config import settings
-from app.schemas.normalized_message import NormalizedMessage
+from app.application.dto.normalized_message import NormalizedMessage
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
