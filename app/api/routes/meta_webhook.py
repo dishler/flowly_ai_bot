@@ -78,10 +78,6 @@ def _parse_facebook(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
 
 
 def _parse_instagram_changes_style(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
-    """
-    Instagram changes-style webhook:
-    entry[].changes[].value.messages[]
-    """
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value") or {}
@@ -119,10 +115,6 @@ def _parse_instagram_changes_style(payload: dict[str, Any]) -> Optional[Normaliz
 
 
 def _parse_instagram_messaging_style(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
-    """
-    Instagram messaging-style webhook:
-    entry[].messaging[]
-    """
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []):
             if _is_echo_or_self_message(event):
@@ -258,4 +250,3 @@ async def receive_meta_webhook(request: Request) -> Response:
             "outbound_result": outbound_result,
         },
     )
-    
