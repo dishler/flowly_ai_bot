@@ -61,6 +61,7 @@ ai_service = AIService(openai_client=openai_client)
 reply_service = ReplyService(
     ai_service=ai_service,
     memory_service=memory_service,
+    knowledge_service=knowledge_service,
 )
 
 meta_client = MetaClient()
