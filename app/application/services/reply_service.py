@@ -54,7 +54,10 @@ class ReplyService:
         if language == "uk":
             parts = []
             if short_description:
-                parts.append(short_description)
+                parts.append(
+                    "Це AI-асистент, який відповідає на вхідні повідомлення, допомагає кваліфікувати запит, "
+                    "відповідає на типові питання та веде клієнта до запису."
+                )
 
             if includes:
                 parts.append("Що входить: " + ", ".join(includes[:5]) + ".")
