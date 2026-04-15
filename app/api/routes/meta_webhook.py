@@ -213,6 +213,40 @@ async def receive_meta_webhook(request: Request) -> Response:
             content={"status": "error", "detail": "Message processor unavailable"},
         )
 
+    dedup_service = getattr(request.app.state, "dedup_service", None)
+    if dedup_service is None:
+        logger.warning("Dedup service is not initialized on app.state")
+    else:
+        try:
+            if dedup_service.is_duplicate(message.message_mid):
+                logger.info(
+                    "Duplicate Meta message ignored",
+                    extra={
+                        "platform": message.platform,
+                        "sender_id": message.sender_id,
+                        "message_mid": message.message_mid,
+                    },
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content={
+                        "status": "duplicate_ignored",
+                        "platform": message.platform,
+                        "message_mid": message.message_mid,
+                    },
+                )
+
+            dedup_service.mark_processed(message.message_mid)
+        except Exception:
+            logger.exception(
+                "Dedup service failed; continuing without duplicate protection",
+                extra={
+                    "platform": message.platform,
+                    "sender_id": message.sender_id,
+                    "message_mid": message.message_mid,
+                },
+            )
+
     try:
         result = message_processor.process(message)
     except Exception:
