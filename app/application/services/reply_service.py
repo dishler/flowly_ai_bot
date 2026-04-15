@@ -1,3 +1,5 @@
+from typing import Optional
+
 from app.application.dto.normalized_message import NormalizedMessage
 from app.application.services.ai_service import AIService
 from app.application.services.knowledge_service import KnowledgeService
@@ -46,20 +48,35 @@ class ReplyService:
             return "We help automate inbound communication and client booking."
 
         short_description = service.get("short_description", "")
+        includes = service.get("includes", [])
         typical_result = service.get("typical_result", [])
 
         if language == "uk":
-            result_part = ""
+            parts = []
+            if short_description:
+                parts.append(short_description)
+
+            if includes:
+                parts.append("Що входить: " + ", ".join(includes[:5]) + ".")
+
             if typical_result:
-                result_part = f" Зазвичай це дає: {', '.join(typical_result[:3])}."
-            return f"{short_description}{result_part}".strip()
+                parts.append("Зазвичай це дає: " + ", ".join(typical_result[:3]) + ".")
 
-        result_part = ""
+            return " ".join(parts).strip() or "Ми допомагаємо автоматизувати обробку вхідних звернень і запис клієнтів."
+
+        parts = []
+        if short_description:
+            parts.append(short_description)
+
+        if includes:
+            parts.append("It typically includes: " + ", ".join(includes[:5]) + ".")
+
         if typical_result:
-            result_part = f" Typical outcomes include: {', '.join(typical_result[:3])}."
-        return f"{short_description}{result_part}".strip()
+            parts.append("Typical outcomes include: " + ", ".join(typical_result[:3]) + ".")
 
-    def _get_channel_reply(self, text: str, language: str) -> str | None:
+        return " ".join(parts).strip() or "We help automate inbound communication and client booking."
+
+    def _get_channel_reply(self, text: str, language: str) -> Optional[str]:
         normalized = text.lower()
 
         if "instagram" in normalized and "facebook" in normalized:
@@ -94,10 +111,13 @@ class ReplyService:
             "pricing",
             "cost",
             "how much",
+            "how much does it cost",
+            "what does it cost",
             "ціна",
             "скільки",
             "вартість",
             "бюджет",
+            "скільки коштує",
         ]
         if any(marker in normalized for marker in price_markers):
             return self._get_pricing_reply(language)
@@ -107,12 +127,17 @@ class ReplyService:
             "що ви робите",
             "як це працює",
             "що входить",
+            "що входить у сервіс",
+            "що входить в сервіс",
+            "що за сервіс",
+            "розкажіть про сервіс",
             "what is this",
             "what do you do",
             "how does it work",
             "what's included",
-            "що за сервіс",
-            "розкажіть про сервіс",
+            "what is included",
+            "what does it include",
+            "tell me about the service",
         ]
         if any(marker in normalized for marker in service_markers):
             return self._get_service_reply(language)
