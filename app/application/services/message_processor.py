@@ -1,4 +1,5 @@
 from typing import Any, Dict
+import re
 
 from app.application.dto.normalized_message import NormalizedMessage
 from app.application.services.booking_service import BookingService
@@ -24,6 +25,54 @@ class MessageProcessor:
         self.intent_service = intent_service
         self.booking_service = booking_service
 
+    def _looks_like_booking_message(self, text: str) -> bool:
+        normalized = text.strip().lower()
+
+        consultation_words = [
+            "consultation",
+            "call",
+            "quick call",
+            "дзвінок",
+            "консультація",
+            "созвон",
+        ]
+
+        date_words = [
+            "today",
+            "tomorrow",
+            "day after tomorrow",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "сьогодні",
+            "завтра",
+            "післязавтра",
+            "понеділок",
+            "вівторок",
+            "середа",
+            "четвер",
+            "п'ятниц",
+            "п’ятниц",
+        ]
+
+        has_consultation = any(word in normalized for word in consultation_words)
+        has_date_word = any(word in normalized for word in date_words)
+        has_time = bool(
+            re.search(r"\b([01]?\d|2[0-3]):[0-5]\d\b", normalized)
+            or re.search(r"\b(10|11|12|13|14|15|16|17|18|19|20|21|22|23)\b", normalized)
+            or re.search(r"\b(о|на)\s*(10|11|12|13|14|15|16|17|18|19|20|21|22|23)\b", normalized)
+        )
+
+        if has_consultation and (has_date_word or has_time):
+            return True
+
+        if has_date_word and has_time:
+            return True
+
+        return False
+
     def process(self, message: NormalizedMessage) -> Dict[str, Any]:
         self.memory_service.add_user_message(message.sender_id, message.user_message)
 
@@ -33,9 +82,12 @@ class MessageProcessor:
         intent_value = intent.value
 
         has_pending_confirmation = self.booking_service.has_pending_confirmation(message.sender_id)
+        force_booking = self._looks_like_booking_message(message.user_message)
 
-        # 1. If user sends a NEW booking request while pending confirmation exists,
-        # treat it as a fresh booking request instead of forcing confirmation flow.
+        if force_booking and intent != IntentType.BOOKING_REQUEST:
+            intent = IntentType.BOOKING_REQUEST
+            intent_value = intent.value
+
         if intent == IntentType.BOOKING_REQUEST:
             booking_result = self.booking_service.handle_booking_request(
                 sender_id=message.sender_id,
@@ -43,8 +95,6 @@ class MessageProcessor:
             )
             reply_text = booking_result["reply_text"]
 
-        # 2. If there is pending confirmation and this is not a new booking request,
-        # try confirmation / rejection flow.
         elif has_pending_confirmation:
             booking_result = self.booking_service.handle_booking_confirmation(
                 sender_id=message.sender_id,
@@ -57,7 +107,6 @@ class MessageProcessor:
             else:
                 reply_text = self.reply_service.generate_reply(message)
 
-        # 3. Normal non-booking flow.
         else:
             reply_text = self.reply_service.generate_reply(message)
 
