@@ -8,6 +8,7 @@ from app.application.services.booking_service import BookingService
 from app.application.services.calendar_service import CalendarService
 from app.application.services.dedup_service import DedupService
 from app.application.services.intent_service import IntentService
+from app.application.services.knowledge_service import KnowledgeService
 from app.application.services.language_service import LanguageService
 from app.application.services.memory_service import MemoryService
 from app.application.services.message_processor import MessageProcessor
@@ -43,6 +44,7 @@ else:
 
 intent_service = IntentService()
 language_service = LanguageService()
+knowledge_service = KnowledgeService()
 
 google_calendar_client = GoogleCalendarClient()
 calendar_service = CalendarService(google_calendar_client=google_calendar_client)
@@ -78,6 +80,7 @@ app.state.dedup_service = dedup_service
 app.state.booking_state_service = booking_state_service
 app.state.intent_service = intent_service
 app.state.language_service = language_service
+app.state.knowledge_service = knowledge_service
 app.state.google_calendar_client = google_calendar_client
 app.state.calendar_service = calendar_service
 app.state.booking_service = booking_service

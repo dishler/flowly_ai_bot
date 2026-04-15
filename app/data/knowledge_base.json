@@ -1,0 +1,50 @@
+{
+    "company": {
+      "name": "Flowly",
+      "short_description": "",
+      "tone": "",
+      "languages": ["uk", "en"]
+    },
+    "services": [
+      {
+        "id": "ai_dm_bot",
+        "name": "AI bot for Instagram/Facebook DMs",
+        "short_description": "",
+        "for_whom": [],
+        "solves": [],
+        "includes": [],
+        "does_not_include": [],
+        "typical_result": []
+      }
+    ],
+    "pricing": {
+      "starting_from_usd": 300,
+      "pricing_note": "",
+      "what_affects_price": [],
+      "how_to_answer_price_questions": ""
+    },
+    "consultation": {
+      "duration_minutes": 30,
+      "goal": "",
+      "cta_soft": ""
+    },
+    "faq": [
+      {
+        "question": "",
+        "answer_uk": "",
+        "answer_en": ""
+      }
+    ],
+    "objections": [
+      {
+        "key": "too_expensive",
+        "answer_uk": "",
+        "answer_en": ""
+      }
+    ],
+    "constraints": {
+      "never_claim": [],
+      "never_guess": true,
+      "handoff_cases": []
+    }
+  }
