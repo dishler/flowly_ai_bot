@@ -1,9 +1,12 @@
+import logging
 from typing import Any, Dict, List, Optional
 
 from app.application.dto.normalized_message import NormalizedMessage
 from app.application.services.ai_service import AIService
 from app.application.services.knowledge_service import KnowledgeService
 from app.application.services.memory_service import MemoryService
+
+logger = logging.getLogger(__name__)
 
 
 class ReplyService:
@@ -192,25 +195,49 @@ class ReplyService:
     def _get_service_system_instruction(self, language: str) -> str:
         if language == "uk":
             return (
-                "Ти AI-асистент компанії Flowly. "
-                "Відповідай ТІЛЬКИ на основі переданого knowledge context. "
-                "Нічого не вигадуй. "
-                "Відповідай коротко, природно, спокійно, по суті та мовою користувача. "
-                "Пояснюй, що це за сервіс, як він працює, що входить, для кого він підходить і який типовий результат. "
-                "Не називай фіксовану ціну для всіх, якщо користувач питає не прямо про ціну. "
-                "Не обіцяй гарантовані результати, продажі чи інтеграції, які не підтверджені. "
-                "За потреби м’яко запропонуй коротку безкоштовну консультацію."
+                "Ти AI-асистент компанії Flowly.\n\n"
+                "Відповідай ТІЛЬКИ українською мовою, без змішування з іншими мовами.\n\n"
+                "Використовуй лише факти з knowledge context, але НЕ копіюй його і НЕ переказуй як список. "
+                "Твоя задача — перетворити ці факти у живу, коротку відповідь.\n\n"
+                "Стиль:\n"
+                "як реальна переписка в Instagram — просто, природно, без канцеляриту і без "
+                "“презентаційного” тону.\n\n"
+                "Правила:\n"
+                "- максимум 3–4 короткі речення\n"
+                "- без списків і довгих переліків\n"
+                "- не пояснюй все одразу, відповідай тільки на те, що запитали\n"
+                "- не повторюй однакову структуру в кожній відповіді\n\n"
+                "Адаптація:\n"
+                "- якщо питають “що це” — коротко поясни суть\n"
+                "- якщо “як працює” — поясни простими словами процес\n"
+                "- якщо “для кого” — скажи кому це реально підходить\n\n"
+                "Заборонено:\n"
+                "- вигадувати\n"
+                "- копіювати KB\n"
+                "- писати як сайт або презентація\n\n"
+                "В кінці (опціонально):\n"
+                "додай одну коротку, природну фразу типу:\n"
+                "“можемо коротко глянути ваш кейс і підказати, як це буде працювати у вас”"
             )
 
         return (
-            "You are an AI assistant for Flowly. "
-            "Answer ONLY using the provided knowledge context. "
-            "Do not invent anything. "
-            "Reply briefly, naturally, calmly, practically, and in the user's language. "
-            "Explain what the service is, how it works, what is included, who it is for, and the typical result. "
-            "Do not present a fixed universal price unless the user directly asks about pricing. "
-            "Do not promise guaranteed results, sales, or unsupported integrations. "
-            "If relevant, softly suggest a short free consultation."
+            "You are an AI assistant for Flowly.\n\n"
+            "Always use one language only, with no language mixing.\n\n"
+            "Use only facts from the knowledge context, but do not copy or dump it like a knowledge base. "
+            "Turn those facts into a short, natural reply.\n\n"
+            "Style:\n"
+            "conversational Instagram DM tone, simple and human.\n\n"
+            "Rules:\n"
+            "- maximum 3-4 short sentences\n"
+            "- no bullet points or list-style dumping in the actual reply\n"
+            "- answer only what the user asked\n"
+            "- avoid repeating the same structure every time\n\n"
+            "Adaptation:\n"
+            "- for what-is questions, explain the core idea briefly\n"
+            "- for how-it-works questions, explain the process in simple words\n"
+            "- for for-whom questions, explain realistic fit\n\n"
+            "Optional ending:\n"
+            "you may add one short, natural soft CTA."
         )
 
     def _get_service_fallback_reply(self, language: str) -> str:
@@ -291,10 +318,25 @@ class ReplyService:
                 history=history,
             )
 
+        if isinstance(ai_result, dict):
+            logger.debug(
+                "ReplyService service-query ai_result: used_ai=%s reason=%s has_reply_text=%s",
+                ai_result.get("used_ai"),
+                ai_result.get("reason"),
+                bool(ai_result.get("reply_text")),
+            )
+
         ai_reply_text = ai_result.get("reply_text") if isinstance(ai_result, dict) else None
         if ai_reply_text:
+            logger.debug("ReplyService service-query path: OpenAI reply_text returned")
             return str(ai_reply_text)
 
+        if isinstance(ai_result, dict):
+            logger.debug(
+                "ReplyService service-query fallback used: used_ai=%s reason=%s",
+                ai_result.get("used_ai"),
+                ai_result.get("reason"),
+            )
         return self._get_service_fallback_reply(language)
 
     def generate_reply(self, message: NormalizedMessage) -> str:
@@ -303,19 +345,31 @@ class ReplyService:
         normalized = self._normalize(text)
         language = self._detect_language(text)
 
-        faq_answer = self.knowledge_service.find_faq_answer(text, language=language)
-        if faq_answer:
-            return faq_answer
-
-        if self._is_price_query(normalized):
-            return self._get_pricing_reply(language)
-
+        # Service-intent questions should prefer grounded AI flow over FAQ dumps.
+        # This avoids repetitive KB-like replies for "what is included/how it works" prompts.
         if self._is_service_query(normalized):
+            logger.debug(
+                "ReplyService route=service_query sender_id=%s normalized=%s",
+                message.sender_id,
+                normalized,
+            )
             return self._generate_service_ai_reply(
                 user_message=message.user_message,
                 history=history,
                 language=language,
             )
+
+        faq_answer = self.knowledge_service.find_faq_answer(text, language=language)
+        if faq_answer:
+            logger.debug(
+                "ReplyService route=faq sender_id=%s normalized=%s",
+                message.sender_id,
+                normalized,
+            )
+            return faq_answer
+
+        if self._is_price_query(normalized):
+            return self._get_pricing_reply(language)
 
         channel_reply = self._get_channel_reply(text, language)
         if channel_reply:
@@ -334,8 +388,15 @@ class ReplyService:
 
         ai_reply_text = ai_result.get("reply_text") if isinstance(ai_result, dict) else None
         if ai_reply_text:
+            logger.debug("ReplyService generic path: OpenAI reply_text returned")
             return str(ai_reply_text)
 
+        if isinstance(ai_result, dict):
+            logger.debug(
+                "ReplyService generic fallback used: used_ai=%s reason=%s",
+                ai_result.get("used_ai"),
+                ai_result.get("reason"),
+            )
         if language == "uk":
             return "Дякую. Можете коротко описати вашу задачу?"
         return "Thanks. Could you briefly describe your request?"
