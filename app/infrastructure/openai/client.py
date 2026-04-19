@@ -1,9 +1,12 @@
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient:
@@ -136,6 +139,25 @@ class OpenAIClient:
 
         return response_input
 
+    def _extract_reply_text(self, response: Any) -> Optional[str]:
+        direct_output_text = getattr(response, "output_text", None)
+        if isinstance(direct_output_text, str) and direct_output_text.strip():
+            return direct_output_text.strip()
+
+        # Some Responses API payloads do not populate output_text directly.
+        output_items = getattr(response, "output", None)
+        if not output_items:
+            return None
+
+        for item in output_items:
+            content_items = getattr(item, "content", None) or []
+            for content_item in content_items:
+                text_value = getattr(content_item, "text", None)
+                if isinstance(text_value, str) and text_value.strip():
+                    return text_value.strip()
+
+        return None
+
     def generate_reply(
         self,
         user_message: str,
@@ -144,6 +166,7 @@ class OpenAIClient:
         system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self.settings.openai_enabled:
+            logger.debug("OpenAI generate_reply fallback: OPENAI_ENABLED is false")
             return {
                 "used_ai": False,
                 "stub": True,
@@ -152,6 +175,7 @@ class OpenAIClient:
             }
 
         if not self.settings.openai_api_key or self.client is None:
+            logger.debug("OpenAI generate_reply fallback: missing OPENAI_API_KEY/client")
             return {
                 "used_ai": False,
                 "stub": True,
@@ -161,6 +185,7 @@ class OpenAIClient:
 
         cleaned_user_message = user_message.strip()
         if not cleaned_user_message:
+            logger.debug("OpenAI generate_reply fallback: empty user message")
             return {
                 "used_ai": False,
                 "stub": False,
@@ -183,9 +208,10 @@ class OpenAIClient:
                 input=self._messages_to_responses_input(messages),
             )
 
-            reply_text = getattr(response, "output_text", None)
+            reply_text = self._extract_reply_text(response)
 
             if not reply_text:
+                logger.debug("OpenAI generate_reply fallback: empty response text")
                 return {
                     "used_ai": False,
                     "stub": False,
@@ -195,6 +221,7 @@ class OpenAIClient:
 
             cleaned_reply = reply_text.strip()
             if not cleaned_reply:
+                logger.debug("OpenAI generate_reply fallback: blank response text")
                 return {
                     "used_ai": False,
                     "stub": False,
@@ -202,6 +229,7 @@ class OpenAIClient:
                     "reply_text": None,
                 }
 
+            logger.debug("OpenAI generate_reply success: reply_text extracted")
             return {
                 "used_ai": True,
                 "stub": False,
@@ -210,6 +238,7 @@ class OpenAIClient:
             }
 
         except Exception as exc:
+            logger.exception("OpenAI generate_reply exception: %s", exc)
             return {
                 "used_ai": False,
                 "stub": False,

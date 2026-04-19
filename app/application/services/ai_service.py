@@ -1,6 +1,9 @@
+import logging
 from typing import Any, Dict, List, Optional
 
 from app.infrastructure.openai.client import OpenAIClient
+
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -73,22 +76,38 @@ class AIService:
         safe_system_instruction = self._sanitize_system_instruction(system_instruction)
 
         try:
-            return self.openai_client.generate_reply(
+            result = self.openai_client.generate_reply(
                 user_message=cleaned_user_message,
                 history=normalized_history,
                 grounding_context=safe_grounding_context,
                 system_instruction=safe_system_instruction,
             )
+            logger.debug(
+                "AIService try_generate_reply result: used_ai=%s reason=%s has_reply_text=%s",
+                result.get("used_ai"),
+                result.get("reason"),
+                bool(result.get("reply_text")),
+            )
+            return result
         except TypeError:
             # Backward compatibility with an older OpenAI client signature
             # that only accepts user_message and history.
             try:
-                return self.openai_client.generate_reply(
+                result = self.openai_client.generate_reply(
                     user_message=cleaned_user_message,
                     history=normalized_history,
                 )
+                logger.debug(
+                    "AIService fallback signature result: used_ai=%s reason=%s has_reply_text=%s",
+                    result.get("used_ai"),
+                    result.get("reason"),
+                    bool(result.get("reply_text")),
+                )
+                return result
             except Exception:
+                logger.exception("AIService fallback signature call failed")
                 return {"reply_text": None}
         except Exception:
+            logger.exception("AIService try_generate_reply failed")
             return {"reply_text": None}
             
