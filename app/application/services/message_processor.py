@@ -135,6 +135,7 @@ class MessageProcessor:
         reply_text = ""
         intent = self.intent_service.detect_intent(message.user_message)
         intent_value = intent.value
+        logger.info("Intent detected: %s", intent)
 
         has_pending_confirmation = self.booking_service.has_pending_confirmation(message.sender_id)
         force_booking = self._looks_like_booking_message(message.user_message)
@@ -165,11 +166,13 @@ class MessageProcessor:
         else:
             reply_text = self.reply_service.generate_reply(message, intent=intent)
 
+        logger.info("Reply before guard: %s", reply_text)
         reply_text = self.reply_service.enforce_response_policy(
             reply_text=reply_text,
             user_text=message.user_message,
             intent=intent,
         )
+        logger.info("Reply after guard: %s", reply_text)
 
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
 

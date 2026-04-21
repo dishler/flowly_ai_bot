@@ -47,12 +47,6 @@ class ReplyService:
         ]
         return any(marker in lowered for marker in russian_markers)
 
-    def _shorten_reply(self, text: str) -> str:
-        chunks = [chunk.strip() for chunk in re.split(r"(?<=[.!?])\s+", text.strip()) if chunk.strip()]
-        if len(chunks) <= 3:
-            return text.strip()
-        return " ".join(chunks[:3]).strip()
-
     def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
         if language == "en":
             if intent == IntentType.PRICE:
@@ -76,7 +70,7 @@ class ReplyService:
         if self._contains_russian(reply_text):
             logger.warning("Russian output detected, applying hard language guard")
             return self._fallback_for_intent(intent, language if language == "en" else "uk")
-        return self._shorten_reply(reply_text)
+        return reply_text
 
     def _normalize(self, text: str) -> str:
         return " ".join(text.lower().strip().split())
@@ -394,70 +388,29 @@ class ReplyService:
     def generate_reply(self, message: NormalizedMessage, intent: Optional[IntentType] = None) -> str:
         history = self.memory_service.get_history(message.sender_id)
         text = message.user_message.strip()
-        normalized = self._normalize(text)
         language = self._detect_language(text)
         resolved_intent = intent or IntentType.GENERAL_QUESTION
 
-        # Service-intent questions should prefer grounded AI flow over FAQ dumps.
-        # This avoids repetitive KB-like replies for "what is included/how it works" prompts.
-        if resolved_intent == IntentType.SERVICE_DESCRIPTION or self._is_service_query(normalized):
-            logger.debug(
-                "ReplyService route=service_query sender_id=%s normalized=%s",
-                message.sender_id,
-                normalized,
-            )
+        if resolved_intent == IntentType.PRICE:
+            return self._get_pricing_reply(language)
+
+        if resolved_intent == IntentType.CHANNELS:
+            channel_reply = self._get_channel_reply(text, language)
+            if channel_reply:
+                return channel_reply
+            return self._fallback_for_intent(IntentType.CHANNELS, language)
+
+        if resolved_intent == IntentType.SERVICE_DESCRIPTION:
             reply = self._generate_service_ai_reply(
                 user_message=message.user_message,
                 history=history,
                 language=language,
             )
-            return self.enforce_response_policy(reply, message.user_message, IntentType.SERVICE_DESCRIPTION)
+            return reply
 
-        if resolved_intent == IntentType.PRICE:
-            return self.enforce_response_policy(self._get_pricing_reply(language), message.user_message, IntentType.PRICE)
+        if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
+            return self._get_consultation_reply(language)
 
-        if resolved_intent == IntentType.CHANNELS:
-            channel_reply = self._get_channel_reply(text, language)
-            if channel_reply:
-                return self.enforce_response_policy(channel_reply, message.user_message, IntentType.CHANNELS)
-            return self.enforce_response_policy(self._fallback_for_intent(IntentType.CHANNELS, language), message.user_message, IntentType.CHANNELS)
-
-        if resolved_intent == IntentType.CONSULTATION_INTEREST:
-            return self.enforce_response_policy(
-                self._get_consultation_reply(language),
-                message.user_message,
-                IntentType.BOOKING_REQUEST,
-            )
-
-        faq_answer = self.knowledge_service.find_faq_answer(text, language=language)
-        if faq_answer:
-            logger.debug(
-                "ReplyService route=faq sender_id=%s normalized=%s",
-                message.sender_id,
-                normalized,
-            )
-            return self.enforce_response_policy(faq_answer, message.user_message, resolved_intent)
-
-        try:
-            ai_result = self.ai_service.try_generate_reply(
-                user_message=message.user_message,
-                history=history,
-            )
-        except TypeError:
-            ai_result = {"reply_text": None}
-
-        ai_reply_text = ai_result.get("reply_text") if isinstance(ai_result, dict) else None
-        if ai_reply_text:
-            logger.debug("ReplyService generic path: OpenAI reply_text returned")
-            return self.enforce_response_policy(str(ai_reply_text), message.user_message, resolved_intent)
-
-        if isinstance(ai_result, dict):
-            logger.debug(
-                "ReplyService generic fallback used: used_ai=%s reason=%s",
-                ai_result.get("used_ai"),
-                ai_result.get("reason"),
-            )
-        if language == "uk":
-            return self._fallback_for_intent(resolved_intent, "uk")
-        return self._fallback_for_intent(resolved_intent, "en")
+        # Unknown intent fallback only.
+        return self._fallback_for_intent(IntentType.SERVICE_DESCRIPTION, language)
         
