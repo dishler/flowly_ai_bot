@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -273,4 +274,71 @@ class OpenAIClient:
                 "stub": False,
                 "reason": f"OpenAI error: {exc}",
                 "reply_text": None,
+            }
+
+    def transcribe_audio(self, file_path: str) -> Dict[str, Any]:
+        if not self.settings.openai_enabled:
+            logger.debug("OpenAI transcribe_audio fallback: OPENAI_ENABLED is false")
+            return {
+                "used_ai": False,
+                "stub": True,
+                "reason": "OPENAI_ENABLED=false",
+                "text": None,
+            }
+
+        if not self.settings.openai_api_key or self.client is None:
+            logger.debug("OpenAI transcribe_audio fallback: missing OPENAI_API_KEY/client")
+            return {
+                "used_ai": False,
+                "stub": True,
+                "reason": "Missing OPENAI_API_KEY",
+                "text": None,
+            }
+
+        path = Path(file_path)
+        if not path.exists() or not path.is_file():
+            logger.debug("OpenAI transcribe_audio fallback: file does not exist")
+            return {
+                "used_ai": False,
+                "stub": False,
+                "reason": f"Audio file not found: {file_path}",
+                "text": None,
+            }
+
+        try:
+            logger.debug("OpenAI transcribe_audio request: file_path=%s", file_path)
+
+            with path.open("rb") as audio_file:
+                response = self.client.audio.transcriptions.create(
+                    model="gpt-4o-mini-transcribe",
+                    file=audio_file,
+                )
+
+            transcript_text = getattr(response, "text", None)
+            cleaned_text = transcript_text.strip() if isinstance(transcript_text, str) else ""
+
+            if not cleaned_text:
+                logger.debug("OpenAI transcribe_audio fallback: empty transcript")
+                return {
+                    "used_ai": False,
+                    "stub": False,
+                    "reason": "Empty transcript",
+                    "text": None,
+                }
+
+            logger.debug("OpenAI transcribe_audio success")
+            return {
+                "used_ai": True,
+                "stub": False,
+                "reason": None,
+                "text": cleaned_text,
+            }
+
+        except Exception as exc:
+            logger.exception("OpenAI transcribe_audio exception: %s", exc)
+            return {
+                "used_ai": False,
+                "stub": False,
+                "reason": f"OpenAI transcription error: {exc}",
+                "text": None,
             }

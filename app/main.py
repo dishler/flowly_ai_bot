@@ -18,6 +18,7 @@ from app.application.services.redis_booking_state_service import RedisBookingSta
 from app.application.services.redis_dedup_service import RedisDedupService
 from app.application.services.redis_memory_service import RedisMemoryService
 from app.application.services.reply_service import ReplyService
+from app.application.services.speech_service import SpeechService
 from app.core.config import get_settings
 from app.infrastructure.google.calendar_client import GoogleCalendarClient
 from app.infrastructure.meta.client import MetaClient
@@ -57,6 +58,7 @@ booking_service = BookingService(
 )
 
 openai_client = OpenAIClient()
+speech_service = SpeechService(openai_client=openai_client)
 ai_service = AIService(openai_client=openai_client)
 
 reply_service = ReplyService(
@@ -74,6 +76,7 @@ message_processor = MessageProcessor(
     outbound_service=outbound_service,
     intent_service=intent_service,
     booking_service=booking_service,
+    speech_service=speech_service,
 )
 
 app.state.redis_client = redis_client
@@ -87,6 +90,7 @@ app.state.google_calendar_client = google_calendar_client
 app.state.calendar_service = calendar_service
 app.state.booking_service = booking_service
 app.state.openai_client = openai_client
+app.state.speech_service = speech_service
 app.state.ai_service = ai_service
 app.state.reply_service = reply_service
 app.state.meta_client = meta_client

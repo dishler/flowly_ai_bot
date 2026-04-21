@@ -7,6 +7,7 @@ from app.application.services.intent_service import IntentService
 from app.application.services.memory_service import MemoryService
 from app.application.services.outbound_service import OutboundService
 from app.application.services.reply_service import ReplyService
+from app.application.services.speech_service import SpeechService
 from app.domain.enums import IntentType
 
 
@@ -18,12 +19,14 @@ class MessageProcessor:
         outbound_service: OutboundService,
         intent_service: IntentService,
         booking_service: BookingService,
+        speech_service: SpeechService,
     ) -> None:
         self.memory_service = memory_service
         self.reply_service = reply_service
         self.outbound_service = outbound_service
         self.intent_service = intent_service
         self.booking_service = booking_service
+        self.speech_service = speech_service
 
     def _looks_like_booking_message(self, text: str) -> bool:
         normalized = text.strip().lower()
@@ -73,7 +76,41 @@ class MessageProcessor:
 
         return False
 
-    def process(self, message: NormalizedMessage) -> Dict[str, Any]:
+    async def _resolve_message_text(self, message: NormalizedMessage) -> str:
+        user_message = (getattr(message, "user_message", "") or "").strip()
+        audio_url = (getattr(message, "audio_url", "") or "").strip()
+
+        if user_message:
+            return user_message
+
+        if audio_url:
+            transcribed_text = await self.speech_service.transcribe_audio(audio_url)
+            return transcribed_text.strip()
+
+        return ""
+
+    async def process(self, message: NormalizedMessage) -> Dict[str, Any]:
+        resolved_text = await self._resolve_message_text(message)
+
+        if not resolved_text:
+            reply_text = "Не зовсім розібрав голосове повідомлення. Можете коротко написати текстом?"
+
+            outbound_result = self.outbound_service.send_reply(
+                platform=message.platform,
+                recipient_id=message.sender_id,
+                text=reply_text,
+            )
+
+            return {
+                "intent": "unrecognized_audio",
+                "reply_text": reply_text,
+                "history": self.memory_service.get_history(message.sender_id),
+                "booking_result": None,
+                "outbound_result": outbound_result,
+            }
+
+        message.user_message = resolved_text
+
         self.memory_service.add_user_message(message.sender_id, message.user_message)
 
         booking_result = None

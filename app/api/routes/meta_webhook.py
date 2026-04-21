@@ -237,6 +237,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         logger.exception("Invalid webhook JSON payload")
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
 
+    logger.info("VOICE BUILD ACTIVE")
     logger.info("FULL META PAYLOAD: %s", json.dumps(payload, indent=2, ensure_ascii=False, default=str))
     logger.info("Meta webhook payload received: %s", jsonable_encoder(payload))
 
@@ -269,7 +270,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
             "reason": "No text or audio found in payload",
         }
 
-    logger.info("Calling message_processor.process for sender_id=%s", message.sender_id)
+    logger.info("Entering message_processor for sender_id=%s", message.sender_id)
     try:
         result = await message_processor.process(message)
     except Exception as exc:
