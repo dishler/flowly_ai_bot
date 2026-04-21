@@ -3,284 +3,236 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Request, Response, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.core.config import settings
 from app.application.dto.normalized_message import NormalizedMessage
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _safe_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
+def _safe_get(data: Any, *keys: Any) -> Any:
+    """Safely walk nested dict/list structures."""
+    current = data
+    for key in keys:
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, list) and isinstance(key, int):
+            if 0 <= key < len(current):
+                current = current[key]
+            else:
+                return None
+        else:
+            return None
+        if current is None:
+            return None
+    return current
 
 
-def _extract_text_from_message(message: dict[str, Any]) -> str:
-    text = _safe_str(message.get("text"))
-    if text:
-        return text
+def _extract_text(payload: dict[str, Any]) -> str:
+    """Extract text from common Messenger / Instagram webhook shapes."""
+    candidates = [
+        _safe_get(payload, "entry", 0, "messaging", 0, "message", "text"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "text", "body"),
+        _safe_get(payload, "message", "text"),
+        _safe_get(payload, "text"),
+    ]
 
-    text_obj = message.get("text")
-    if isinstance(text_obj, dict):
-        body = _safe_str(text_obj.get("body"))
-        if body:
-            return body
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
 
     return ""
 
 
-def _is_echo_or_self_message(event: dict[str, Any]) -> bool:
-    message = event.get("message") or {}
+def _extract_audio_url(payload: dict[str, Any]) -> Optional[str]:
+    """
+    Extract audio URL from likely Meta webhook shapes.
 
-    if message.get("is_echo") is True:
-        return True
+    Depending on the integration, audio may appear as:
+    - attachments on Messenger
+    - audio object in WhatsApp-like Meta payloads
+    - nested media/url fields
+    """
+    candidates = [
+        _safe_get(payload, "entry", 0, "messaging", 0, "message", "attachments", 0, "payload", "url"),
+        _safe_get(payload, "entry", 0, "messaging", 0, "message", "attachments", 0, "url"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "audio", "url"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "voice", "url"),
+        _safe_get(payload, "audio", "url"),
+        _safe_get(payload, "voice", "url"),
+        _safe_get(payload, "media", "url"),
+    ]
 
-    sender_id = _safe_str(event.get("sender", {}).get("id"))
-    recipient_id = _safe_str(event.get("recipient", {}).get("id"))
-
-    if sender_id and recipient_id and sender_id == recipient_id:
-        return True
-
-    return False
-
-
-def _parse_facebook(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
-    for entry in payload.get("entry", []):
-        for event in entry.get("messaging", []):
-            if _is_echo_or_self_message(event):
-                continue
-
-            message = event.get("message") or {}
-            text = _extract_text_from_message(message)
-
-            sender_id = event.get("sender", {}).get("id")
-            recipient_id = event.get("recipient", {}).get("id")
-            timestamp = event.get("timestamp")
-            mid = message.get("mid")
-
-            if not text or not sender_id or not recipient_id or not mid:
-                continue
-
-            return NormalizedMessage(
-                platform="facebook",
-                sender_id=str(sender_id),
-                recipient_id=str(recipient_id),
-                message_mid=str(mid),
-                user_message=str(text),
-                timestamp=timestamp,
-            )
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
 
     return None
 
 
-def _parse_instagram_changes_style(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
-    for entry in payload.get("entry", []):
-        for change in entry.get("changes", []):
-            value = change.get("value") or {}
-            messages = value.get("messages") or []
+def _extract_sender_id(payload: dict[str, Any]) -> str:
+    """Extract sender/user id from common Meta webhook shapes."""
+    candidates = [
+        _safe_get(payload, "entry", 0, "messaging", 0, "sender", "id"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "from"),
+        _safe_get(payload, "sender_id"),
+        _safe_get(payload, "from"),
+    ]
 
-            if not messages:
-                continue
+    for value in candidates:
+        if value is not None:
+            return str(value)
 
-            for msg in messages:
-                text_obj = msg.get("text") or {}
-                text = _safe_str(text_obj.get("body")) if isinstance(text_obj, dict) else _safe_str(msg.get("text"))
-
-                sender_id = msg.get("from")
-                recipient_id = (
-                    value.get("metadata", {}).get("phone_number_id")
-                    or value.get("metadata", {}).get("display_phone_number")
-                    or value.get("id")
-                )
-                timestamp = msg.get("timestamp")
-                mid = msg.get("id")
-
-                if not text or not sender_id or not recipient_id or not mid:
-                    continue
-
-                return NormalizedMessage(
-                    platform="instagram",
-                    sender_id=str(sender_id),
-                    recipient_id=str(recipient_id),
-                    message_mid=str(mid),
-                    user_message=str(text),
-                    timestamp=timestamp,
-                )
-
-    return None
+    return "unknown"
 
 
-def _parse_instagram_messaging_style(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
-    for entry in payload.get("entry", []):
-        for event in entry.get("messaging", []):
-            if _is_echo_or_self_message(event):
-                continue
+def _extract_recipient_id(payload: dict[str, Any]) -> str:
+    candidates = [
+        _safe_get(payload, "entry", 0, "messaging", 0, "recipient", "id"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "metadata", "display_phone_number"),
+        _safe_get(payload, "recipient_id"),
+        _safe_get(payload, "to"),
+    ]
 
-            message = event.get("message") or {}
-            text = _extract_text_from_message(message)
+    for value in candidates:
+        if value is not None:
+            return str(value)
 
-            sender_id = event.get("sender", {}).get("id")
-            recipient_id = event.get("recipient", {}).get("id")
-            timestamp = event.get("timestamp")
-            mid = message.get("mid")
-
-            if not text or not sender_id or not recipient_id or not mid:
-                continue
-
-            return NormalizedMessage(
-                platform="instagram",
-                sender_id=str(sender_id),
-                recipient_id=str(recipient_id),
-                message_mid=str(mid),
-                user_message=str(text),
-                timestamp=timestamp,
-            )
-
-    return None
+    return ""
 
 
-def _parse_meta_payload(payload: dict[str, Any]) -> Optional[NormalizedMessage]:
-    parsed = _parse_instagram_messaging_style(payload)
-    if parsed is not None:
-        return parsed
+def _extract_message_mid(payload: dict[str, Any]) -> str:
+    candidates = [
+        _safe_get(payload, "entry", 0, "messaging", 0, "message", "mid"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "id"),
+        _safe_get(payload, "message_mid"),
+        _safe_get(payload, "id"),
+    ]
 
-    parsed = _parse_instagram_changes_style(payload)
-    if parsed is not None:
-        return parsed
+    for value in candidates:
+        if value is not None:
+            return str(value)
 
-    parsed = _parse_facebook(payload)
-    if parsed is not None:
-        return parsed
-
-    return None
+    return ""
 
 
-@router.get("/meta", response_class=PlainTextResponse)
-async def verify_meta_webhook(request: Request) -> PlainTextResponse:
-    mode = request.query_params.get("hub.mode")
-    token = request.query_params.get("hub.verify_token")
-    challenge = request.query_params.get("hub.challenge", "")
+def _extract_platform(payload: dict[str, Any]) -> str:
+    if _safe_get(payload, "entry", 0, "messaging", 0) is not None:
+        return "facebook"
 
-    if mode == "subscribe" and token == settings.meta_verify_token:
-        logger.info("Meta webhook verification succeeded")
-        return PlainTextResponse(content=challenge, status_code=status.HTTP_200_OK)
+    if _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0) is not None:
+        return "instagram"
 
-    logger.warning("Meta webhook verification failed")
-    return PlainTextResponse(content="Verification failed", status_code=status.HTTP_403_FORBIDDEN)
+    return "facebook"
+
+
+def _build_normalized_message(payload: dict[str, Any]) -> NormalizedMessage:
+    user_message = _extract_text(payload)
+    audio_url = _extract_audio_url(payload)
+    sender_id = _extract_sender_id(payload)
+    recipient_id = _extract_recipient_id(payload)
+    message_mid = _extract_message_mid(payload)
+    platform = _extract_platform(payload)
+
+    return NormalizedMessage(
+        platform=platform,
+        sender_id=sender_id,
+        recipient_id=recipient_id,
+        message_mid=message_mid,
+        user_message=user_message,
+        audio_url=audio_url,
+    )
+
+
+@router.get("/meta")
+async def verify_meta_webhook(
+    hub_mode: Optional[str] = Query(default=None, alias="hub.mode"),
+    hub_verify_token: Optional[str] = Query(default=None, alias="hub.verify_token"),
+    hub_challenge: Optional[str] = Query(default=None, alias="hub.challenge"),
+    request: Request = None,
+) -> str:
+    """
+    Meta webhook verification endpoint.
+    Returns the challenge when the verify token matches.
+    """
+    verify_token = getattr(request.app.state, "meta_verify_token", None)
+
+    if hub_mode == "subscribe" and hub_verify_token == verify_token and hub_challenge:
+        return hub_challenge
+
+    raise HTTPException(status_code=403, detail="Webhook verification failed")
 
 
 @router.post("/meta")
-async def receive_meta_webhook(request: Request) -> Response:
+async def receive_meta_webhook(request: Request) -> dict[str, Any]:
+    """
+    Main Meta webhook receiver.
+    - extracts text
+    - extracts audio_url
+    - builds NormalizedMessage
+    - passes message into async MessageProcessor
+    """
     try:
         payload = await request.json()
-    except Exception:
-        logger.exception("Failed to parse Meta webhook JSON payload")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"status": "bad_request", "detail": "Invalid JSON payload"},
-        )
+    except Exception as exc:
+        logger.exception("Invalid webhook JSON payload")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
 
-    message = _parse_meta_payload(payload)
-
-    if message is None:
-        logger.info(
-            "Meta webhook ignored: unsupported or non-message event",
-            extra={"object": payload.get("object")},
-        )
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"status": "ignored"},
-        )
-
-    logger.info(
-        "Meta inbound message received",
-        extra={
-            "platform": message.platform,
-            "sender_id": message.sender_id,
-            "message_mid": message.message_mid,
-        },
-    )
+    logger.info("Meta webhook payload received: %s", jsonable_encoder(payload))
 
     message_processor = getattr(request.app.state, "message_processor", None)
     if message_processor is None:
-        logger.error("Message processor is not initialized on app.state")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"status": "error", "detail": "Message processor unavailable"},
-        )
-
-    dedup_service = getattr(request.app.state, "dedup_service", None)
-    if dedup_service is None:
-        logger.warning("Dedup service is not initialized on app.state")
-    else:
-        try:
-            if dedup_service.is_duplicate(message.message_mid):
-                logger.info(
-                    "Duplicate Meta message ignored",
-                    extra={
-                        "platform": message.platform,
-                        "sender_id": message.sender_id,
-                        "message_mid": message.message_mid,
-                    },
-                )
-                return JSONResponse(
-                    status_code=status.HTTP_200_OK,
-                    content={
-                        "status": "duplicate_ignored",
-                        "platform": message.platform,
-                        "message_mid": message.message_mid,
-                    },
-                )
-
-            dedup_service.mark_processed(message.message_mid)
-        except Exception:
-            logger.exception(
-                "Dedup service failed; continuing without duplicate protection",
-                extra={
-                    "platform": message.platform,
-                    "sender_id": message.sender_id,
-                    "message_mid": message.message_mid,
-                },
-            )
+        raise HTTPException(status_code=500, detail="message_processor is not configured")
 
     try:
-        result = message_processor.process(message)
-    except Exception:
-        logger.exception("Message processor failed")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"status": "error", "detail": "Processing failed"},
-        )
-
-    outbound_sent = False
-    outbound_result = None
-
-    if isinstance(result, dict):
-        outbound_result = result.get("outbound_result")
-        if isinstance(outbound_result, dict):
-            outbound_sent = bool(outbound_result.get("sent"))
+        message = _build_normalized_message(payload)
+    except Exception as exc:
+        logger.exception("Failed to build NormalizedMessage from payload")
+        return {
+            "status": "error",
+            "reason": "failed_to_normalize_message",
+            "detail": str(exc),
+        }
 
     logger.info(
-        "Meta message processed",
-        extra={
-            "platform": message.platform,
-            "sender_id": message.sender_id,
-            "message_mid": message.message_mid,
-            "outbound_sent": outbound_sent,
-        },
+        "NormalizedMessage created: sender_id=%s platform=%s has_text=%s has_audio=%s",
+        message.sender_id,
+        message.platform,
+        bool(message.user_message),
+        bool(message.audio_url),
     )
 
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "status": "processed",
+    if not message.user_message and not message.audio_url:
+        return {
+            "status": "ignored",
+            "reason": "No text or audio found in payload",
+        }
+
+    logger.info("Calling message_processor.process for sender_id=%s", message.sender_id)
+    try:
+        result = await message_processor.process(message)
+    except Exception as exc:
+        logger.exception("message_processor.process failed for sender_id=%s", message.sender_id)
+        return {
+            "status": "error",
+            "reason": "message_processing_failed",
+            "detail": str(exc),
+        }
+    logger.info("message_processor.process completed for sender_id=%s", message.sender_id)
+
+    safe_result = jsonable_encoder(result)
+
+    return {
+        "status": "ok",
+        "normalized_message": {
             "platform": message.platform,
+            "sender_id": message.sender_id,
+            "recipient_id": message.recipient_id,
             "message_mid": message.message_mid,
-            "outbound_sent": outbound_sent,
-            "outbound_result": outbound_result,
+            "user_message": message.user_message,
+            "audio_url": message.audio_url,
         },
-    )
+        "result": safe_result,
+    }
