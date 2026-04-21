@@ -1,10 +1,12 @@
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from app.application.dto.normalized_message import NormalizedMessage
 from app.application.services.ai_service import AIService
 from app.application.services.knowledge_service import KnowledgeService
 from app.application.services.memory_service import MemoryService
+from app.domain.enums import IntentType
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +23,60 @@ class ReplyService:
         self.knowledge_service = knowledge_service
 
     def _detect_language(self, text: str) -> str:
-        for ch in text:
-            if ch in "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя":
-                return "uk"
+        has_cyrillic = bool(re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", text))
+        has_latin = bool(re.search(r"[A-Za-z]", text))
+        if has_latin and not has_cyrillic:
+            return "en"
+        if has_cyrillic:
+            return "uk"
         return "en"
+
+    def _contains_russian(self, text: str) -> bool:
+        lowered = text.lower()
+        if any(ch in lowered for ch in ("ё", "ъ", "ы", "э")):
+            return True
+        russian_markers = [
+            "что",
+            "это",
+            "работает",
+            "стоит",
+            "входит",
+            "только",
+            "можем",
+            "давайте",
+        ]
+        return any(marker in lowered for marker in russian_markers)
+
+    def _shorten_reply(self, text: str) -> str:
+        chunks = [chunk.strip() for chunk in re.split(r"(?<=[.!?])\s+", text.strip()) if chunk.strip()]
+        if len(chunks) <= 3:
+            return text.strip()
+        return " ".join(chunks[:3]).strip()
+
+    def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
+        if language == "en":
+            if intent == IntentType.PRICE:
+                return "Pricing starts from $300 and depends on your case. Want a quick estimate for your workflow?"
+            if intent == IntentType.CHANNELS:
+                return "We work with Instagram, Facebook, WhatsApp, and Telegram. Which channel is your priority?"
+            if intent == IntentType.BOOKING_REQUEST:
+                return "Sure, we can arrange a short call. What day and time works best for you?"
+            return "Flowly automates replies, lead qualification, and booking in messengers. Want a quick example for your business?"
+
+        if intent == IntentType.PRICE:
+            return "Вартість стартує від 300$, але залежить від задач. Хочете, зорієнтую по бюджету під ваш кейс?"
+        if intent == IntentType.CHANNELS:
+            return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Який канал для вас пріоритетний?"
+        if intent == IntentType.BOOKING_REQUEST:
+            return "Так, можемо узгодити короткий дзвінок. Який день і час вам зручні?"
+        return "Flowly автоматизує відповіді, кваліфікацію лідів і запис у месенджерах. Хочете короткий приклад під ваш бізнес?"
+
+    def enforce_response_policy(self, reply_text: str, user_text: str, intent: IntentType) -> str:
+        language = self._detect_language(user_text)
+        if self._contains_russian(reply_text):
+            logger.warning("Russian output detected, applying hard language guard")
+            return self._fallback_for_intent(intent, language if language == "en" else "uk")
+        return self._shorten_reply(reply_text)
 
     def _normalize(self, text: str) -> str:
         return " ".join(text.lower().strip().split())
@@ -339,24 +391,42 @@ class ReplyService:
             )
         return self._get_service_fallback_reply(language)
 
-    def generate_reply(self, message: NormalizedMessage) -> str:
+    def generate_reply(self, message: NormalizedMessage, intent: Optional[IntentType] = None) -> str:
         history = self.memory_service.get_history(message.sender_id)
         text = message.user_message.strip()
         normalized = self._normalize(text)
         language = self._detect_language(text)
+        resolved_intent = intent or IntentType.GENERAL_QUESTION
 
         # Service-intent questions should prefer grounded AI flow over FAQ dumps.
         # This avoids repetitive KB-like replies for "what is included/how it works" prompts.
-        if self._is_service_query(normalized):
+        if resolved_intent == IntentType.SERVICE_DESCRIPTION or self._is_service_query(normalized):
             logger.debug(
                 "ReplyService route=service_query sender_id=%s normalized=%s",
                 message.sender_id,
                 normalized,
             )
-            return self._generate_service_ai_reply(
+            reply = self._generate_service_ai_reply(
                 user_message=message.user_message,
                 history=history,
                 language=language,
+            )
+            return self.enforce_response_policy(reply, message.user_message, IntentType.SERVICE_DESCRIPTION)
+
+        if resolved_intent == IntentType.PRICE:
+            return self.enforce_response_policy(self._get_pricing_reply(language), message.user_message, IntentType.PRICE)
+
+        if resolved_intent == IntentType.CHANNELS:
+            channel_reply = self._get_channel_reply(text, language)
+            if channel_reply:
+                return self.enforce_response_policy(channel_reply, message.user_message, IntentType.CHANNELS)
+            return self.enforce_response_policy(self._fallback_for_intent(IntentType.CHANNELS, language), message.user_message, IntentType.CHANNELS)
+
+        if resolved_intent == IntentType.CONSULTATION_INTEREST:
+            return self.enforce_response_policy(
+                self._get_consultation_reply(language),
+                message.user_message,
+                IntentType.BOOKING_REQUEST,
             )
 
         faq_answer = self.knowledge_service.find_faq_answer(text, language=language)
@@ -366,17 +436,7 @@ class ReplyService:
                 message.sender_id,
                 normalized,
             )
-            return faq_answer
-
-        if self._is_price_query(normalized):
-            return self._get_pricing_reply(language)
-
-        channel_reply = self._get_channel_reply(text, language)
-        if channel_reply:
-            return channel_reply
-
-        if self._is_consultation_query(normalized):
-            return self._get_consultation_reply(language)
+            return self.enforce_response_policy(faq_answer, message.user_message, resolved_intent)
 
         try:
             ai_result = self.ai_service.try_generate_reply(
@@ -389,7 +449,7 @@ class ReplyService:
         ai_reply_text = ai_result.get("reply_text") if isinstance(ai_result, dict) else None
         if ai_reply_text:
             logger.debug("ReplyService generic path: OpenAI reply_text returned")
-            return str(ai_reply_text)
+            return self.enforce_response_policy(str(ai_reply_text), message.user_message, resolved_intent)
 
         if isinstance(ai_result, dict):
             logger.debug(
@@ -398,6 +458,6 @@ class ReplyService:
                 ai_result.get("reason"),
             )
         if language == "uk":
-            return "Дякую. Можете коротко описати вашу задачу?"
-        return "Thanks. Could you briefly describe your request?"
+            return self._fallback_for_intent(resolved_intent, "uk")
+        return self._fallback_for_intent(resolved_intent, "en")
         

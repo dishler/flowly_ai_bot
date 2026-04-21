@@ -16,6 +16,31 @@ class IntentService:
             "бюджет",
         ]
 
+        channel_markers = [
+            "instagram",
+            "facebook",
+            "whatsapp",
+            "telegram",
+            "канал",
+            "канали",
+            "месенджер",
+            "месенджери",
+        ]
+
+        service_markers = [
+            "що це",
+            "що ви робите",
+            "як це працює",
+            "що входить",
+            "для кого",
+            "what is this",
+            "what do you do",
+            "how does it work",
+            "what is included",
+            "what's included",
+            "who is it for",
+        ]
+
         booking_markers = [
             "book",
             "booking",
@@ -147,5 +172,11 @@ class IntentService:
 
         if any(marker in normalized for marker in price_markers):
             return IntentType.PRICE
+
+        if any(marker in normalized for marker in channel_markers):
+            return IntentType.CHANNELS
+
+        if any(marker in normalized for marker in service_markers):
+            return IntentType.SERVICE_DESCRIPTION
 
         return IntentType.GENERAL_QUESTION

@@ -142,10 +142,16 @@ class MessageProcessor:
             if booking_result is not None:
                 reply_text = booking_result["reply_text"]
             else:
-                reply_text = self.reply_service.generate_reply(message)
+                reply_text = self.reply_service.generate_reply(message, intent=intent)
 
         else:
-            reply_text = self.reply_service.generate_reply(message)
+            reply_text = self.reply_service.generate_reply(message, intent=intent)
+
+        reply_text = self.reply_service.enforce_response_policy(
+            reply_text=reply_text,
+            user_text=message.user_message,
+            intent=intent,
+        )
 
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
 
