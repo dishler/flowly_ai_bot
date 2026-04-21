@@ -74,6 +74,7 @@ message_processor = MessageProcessor(
     memory_service=memory_service,
     reply_service=reply_service,
     outbound_service=outbound_service,
+    dedup_service=dedup_service,
     intent_service=intent_service,
     booking_service=booking_service,
     speech_service=speech_service,

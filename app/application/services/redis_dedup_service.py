@@ -25,10 +25,10 @@ class RedisDedupService:
         self.redis_client.set(
             key,
             "1",
-            ex=self.settings.redis_message_ttl_seconds,
+            ex=600,
         )
 
     @staticmethod
     def _build_key(message_mid: str) -> str:
-        return f"meta_bot:dedup:{message_mid}"
+        return f"processed_message:{message_mid}"
         

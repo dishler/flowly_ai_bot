@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict
 import re
 
@@ -10,6 +11,8 @@ from app.application.services.reply_service import ReplyService
 from app.application.services.speech_service import SpeechService
 from app.domain.enums import IntentType
 
+logger = logging.getLogger(__name__)
+
 
 class MessageProcessor:
     def __init__(
@@ -17,6 +20,7 @@ class MessageProcessor:
         memory_service: MemoryService,
         reply_service: ReplyService,
         outbound_service: OutboundService,
+        dedup_service: Any,
         intent_service: IntentService,
         booking_service: BookingService,
         speech_service: SpeechService,
@@ -24,6 +28,7 @@ class MessageProcessor:
         self.memory_service = memory_service
         self.reply_service = reply_service
         self.outbound_service = outbound_service
+        self.dedup_service = dedup_service
         self.intent_service = intent_service
         self.booking_service = booking_service
         self.speech_service = speech_service
@@ -90,6 +95,19 @@ class MessageProcessor:
         return ""
 
     async def process(self, message: NormalizedMessage) -> Dict[str, Any]:
+        message_mid = (getattr(message, "message_mid", "") or "").strip()
+        if message_mid:
+            if self.dedup_service.is_duplicate(message_mid):
+                logger.info("Duplicate message skipped: %s", message_mid)
+                return {
+                    "intent": "duplicate_skipped",
+                    "reply_text": "",
+                    "history": self.memory_service.get_history(message.sender_id),
+                    "booking_result": None,
+                    "outbound_result": None,
+                }
+            self.dedup_service.mark_processed(message_mid)
+
         resolved_text = await self._resolve_message_text(message)
 
         if not resolved_text:
