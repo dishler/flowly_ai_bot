@@ -13,6 +13,16 @@ from app.domain.enums import IntentType
 
 logger = logging.getLogger(__name__)
 
+_STANDARD_SALES_INTENTS = frozenset(
+    {
+        IntentType.PRICE,
+        IntentType.CHANNELS,
+        IntentType.SERVICE_DESCRIPTION,
+        IntentType.BOOKING_REQUEST,
+        IntentType.CONSULTATION_INTEREST,
+    }
+)
+
 
 class MessageProcessor:
     def __init__(
@@ -146,11 +156,7 @@ class MessageProcessor:
             intent = IntentType.BOOKING_REQUEST
             intent_value = intent.value
 
-        if self.reply_service.should_escalate(message.user_message, history):
-            language = self.reply_service._detect_language(message.user_message)
-            reply_text = self.reply_service.get_escalation_reply(language)
-            routing_category = "escalate_to_human"
-        elif intent == IntentType.BOOKING_REQUEST:
+        if intent == IntentType.BOOKING_REQUEST:
             booking_result = self.booking_service.handle_booking_request(
                 sender_id=message.sender_id,
                 message_text=message.user_message,
@@ -170,23 +176,25 @@ class MessageProcessor:
                 routing_category = "consultation_cta"
             else:
                 reply_text = self.reply_service.generate_reply(message, intent=intent)
-                if intent in {
-                    IntentType.PRICE,
-                    IntentType.CHANNELS,
-                    IntentType.SERVICE_DESCRIPTION,
-                }:
+                if intent in _STANDARD_SALES_INTENTS:
                     routing_category = "consultation_cta"
+
+        elif intent not in _STANDARD_SALES_INTENTS:
+            should_handoff, escalation_reason = self.reply_service.evaluate_escalation(
+                message.user_message, history
+            )
+            if should_handoff:
+                logger.info("Escalation triggered: %s", escalation_reason)
+                language = self.reply_service.detect_user_language(message.user_message)
+                reply_text = self.reply_service.get_escalation_reply(language)
+                routing_category = "escalate_to_human"
+            else:
+                reply_text = self.reply_service.generate_reply(message, intent=intent)
+                routing_category = "answered_basic"
 
         else:
             reply_text = self.reply_service.generate_reply(message, intent=intent)
-            if intent in {
-                IntentType.PRICE,
-                IntentType.CHANNELS,
-                IntentType.SERVICE_DESCRIPTION,
-                IntentType.BOOKING_REQUEST,
-                IntentType.CONSULTATION_INTEREST,
-            }:
-                routing_category = "consultation_cta"
+            routing_category = "consultation_cta"
 
         logger.info("Reply before guard: %s", reply_text)
         reply_text = self.reply_service.enforce_response_policy(

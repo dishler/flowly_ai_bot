@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.application.dto.normalized_message import NormalizedMessage
 from app.application.services.ai_service import AIService
@@ -70,38 +70,85 @@ class ReplyService:
             return "This is a more case-specific question. To give you an accurate answer, one of our specialists can follow up with you shortly."
         return "Це вже більш індивідуальне питання. Щоб дати точну відповідь, з вами може коротко зв’язатися наш спеціаліст."
 
-    def should_escalate(self, user_text: str, history: List[str]) -> bool:
+    def detect_user_language(self, text: str) -> str:
+        return self._detect_language(text)
+
+    def evaluate_escalation(self, user_text: str, history: List[str]) -> Tuple[bool, str]:
+        """
+        Escalate only for non-standard / complex cases. Standard FAQ intents are handled
+        elsewhere and must not hit this path.
+        """
         normalized = self._normalize(user_text)
-        technical_markers = [
+
+        integration_markers = [
             "api",
-            "crm",
-            "integration",
             "webhook",
             "sdk",
             "endpoint",
             "інтеграція",
+            "integration",
+            "crm",
+        ]
+        technical_markers = [
             "техніч",
-            "кастом",
-            "custom",
+            "technical",
+        ]
+        legal_markers = [
             "contract",
             "legal",
             "гаранті",
             "догов",
             "sla",
+            "угод",
         ]
-        complex_markers = [
-            "and also",
-            "також",
-            "і ще",
-            "plus",
-            "а ще",
-            "додатково",
+        enterprise_markers = [
+            "кастом",
+            "custom",
+            "філій",
+            "філія",
+            "філіями",
+            "ip-телефон",
+            "ip телефон",
+            "внутрішн",
+            "внутрішня система",
+            "мережа клінік",
+            "мережу клінік",
+            "мережею клінік",
+            "складна логіка",
+            "branches",
+            "multi-location",
+            "franchise",
+            "кілька філій",
+            "5 філій",
         ]
-        long_or_multipart = len(user_text) > 180 or user_text.count("?") > 1
-        has_technical = any(marker in normalized for marker in technical_markers)
-        has_complex = any(marker in normalized for marker in complex_markers)
-        too_many_turns = len(history) >= 6
-        return long_or_multipart or has_technical or has_complex or too_many_turns
+
+        if any(marker in normalized for marker in integration_markers):
+            return True, "integration_or_technical_stack"
+        if any(marker in normalized for marker in technical_markers):
+            return True, "technical_question"
+        if any(marker in normalized for marker in legal_markers):
+            return True, "legal_or_contract"
+        if any(marker in normalized for marker in enterprise_markers):
+            return True, "enterprise_or_custom_setup"
+
+        question_marks = user_text.count("?")
+        very_long = len(user_text) > 420
+        multipart_heavy = question_marks >= 2 and len(user_text) > 140
+
+        if very_long:
+            return True, "very_long_message"
+        if multipart_heavy:
+            return True, "multipart_question"
+
+        user_turns = sum(1 for line in history if line.startswith("user:"))
+        if user_turns >= 4:
+            return True, "many_turns_unresolved"
+
+        return False, ""
+
+    def should_escalate(self, user_text: str, history: List[str]) -> bool:
+        should, _ = self.evaluate_escalation(user_text, history)
+        return should
 
     def enforce_response_policy(self, reply_text: str, user_text: str, intent: IntentType) -> str:
         language = self._detect_language(user_text)
