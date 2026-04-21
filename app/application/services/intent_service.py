@@ -1,4 +1,8 @@
+import logging
+
 from app.domain.enums import IntentType
+
+logger = logging.getLogger(__name__)
 
 
 class IntentService:
@@ -6,177 +10,89 @@ class IntentService:
         normalized = text.strip().lower()
 
         price_markers = [
+            "ціна",
+            "вартість",
+            "скільки коштує",
+            "скільки буде",
+            "бюджет",
+            "цена",
+            "стоимость",
+            "сколько стоит",
+            "сколько будет",
             "price",
             "pricing",
             "cost",
             "how much",
-            "ціна",
-            "скільки",
-            "вартість",
-            "бюджет",
         ]
 
         channel_markers = [
             "instagram",
+            "інстаграм",
+            "инстаграм",
             "facebook",
+            "фейсбук",
             "whatsapp",
             "telegram",
+            "телеграм",
+            "канали",
+            "каналы",
+            "channels",
+            "тільки з instagram",
+            "только с instagram",
+            "only with instagram",
+            "only instagram",
             "канал",
             "канали",
-            "месенджер",
-            "месенджери",
         ]
 
         service_markers = [
-            "що це",
             "що ви робите",
-            "як це працює",
             "що входить",
-            "для кого",
-            "what is this",
+            "що входить у сервіс",
+            "для стоматології",
+            "для клініки",
+            "що включено",
+            "что входит",
+            "что вы делаете",
+            "что входит в сервис",
+            "для стоматологии",
+            "для клиники",
+            "что включено",
             "what do you do",
-            "how does it work",
             "what is included",
             "what's included",
-            "who is it for",
+            "what’s included",
+            "for dental clinic",
+            "for dentistry",
+            "what does the service include",
         ]
 
         booking_markers = [
-            "book",
-            "booking",
-            "available time",
-            "available slot",
-            "schedule a call",
-            "book a call",
-            "set up a call",
-            "calendar",
-            "slot",
-            "appointment",
-            "do you have time",
-            "what time works",
-            "what time do you have",
-            "are you free",
-            "tomorrow at",
-            "today at",
-            "monday at",
-            "tuesday at",
-            "wednesday at",
-            "thursday at",
-            "friday at",
-            "зустріч",
-            "забронювати",
+            "консультація",
+            "дзвінок",
             "запис",
-            "коли вам зручно",
-            "коли можна",
-            "слот",
-            "час для дзвінка",
-            "завтра о",
-            "сьогодні о",
-            "завтра на",
-            "сьогодні на",
-            "на завтра",
-            "на сьогодні",
-            "на 10",
-            "на 11",
-            "на 12",
-            "на 13",
-            "на 14",
-            "на 15",
-            "на 16",
-            "на 17",
-            "о 10",
-            "о 11",
-            "о 12",
-            "о 13",
-            "о 14",
-            "о 15",
-            "о 16",
-            "о 17",
-        ]
-
-        consultation_markers = [
+            "зустріч",
+            "консультация",
+            "звонок",
+            "запись",
+            "встреча",
             "consultation",
             "call",
-            "quick call",
-            "discuss",
-            "let's talk",
-            "can we talk",
-            "дзвінок",
-            "консультація",
-            "обговорити",
-            "созвон",
+            "booking",
+            "meeting",
         ]
 
-        time_markers = [
-            "tomorrow",
-            "today",
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "10",
-            "11",
-            "12",
-            "13",
-            "14",
-            "15",
-            "16",
-            "17",
-            "10:",
-            "11:",
-            "12:",
-            "13:",
-            "14:",
-            "15:",
-            "16:",
-            "17:",
-            "завтра",
-            "сьогодні",
-            "понеділок",
-            "вівторок",
-            "середа",
-            "четвер",
-            "п’ятниц",
-            "п'ятниц",
-            "о 10",
-            "о 11",
-            "о 12",
-            "о 13",
-            "о 14",
-            "о 15",
-            "о 16",
-            "о 17",
-            "на 10",
-            "на 11",
-            "на 12",
-            "на 13",
-            "на 14",
-            "на 15",
-            "на 16",
-            "на 17",
-        ]
-
-        has_booking_marker = any(marker in normalized for marker in booking_markers)
-        has_consultation_marker = any(marker in normalized for marker in consultation_markers)
-        has_time_marker = any(marker in normalized for marker in time_markers)
-
-        if has_booking_marker:
-            return IntentType.BOOKING_REQUEST
-
-        if has_consultation_marker and has_time_marker:
-            return IntentType.BOOKING_REQUEST
-
-        if has_consultation_marker:
-            return IntentType.CONSULTATION_INTEREST
-
+        # Priority: PRICE > CHANNELS > SERVICE_DESCRIPTION > BOOKING > FALLBACK
         if any(marker in normalized for marker in price_markers):
-            return IntentType.PRICE
+            intent = IntentType.PRICE
+        elif any(marker in normalized for marker in channel_markers):
+            intent = IntentType.CHANNELS
+        elif any(marker in normalized for marker in service_markers):
+            intent = IntentType.SERVICE_DESCRIPTION
+        elif any(marker in normalized for marker in booking_markers):
+            intent = IntentType.BOOKING_REQUEST
+        else:
+            intent = IntentType.GENERAL_QUESTION
 
-        if any(marker in normalized for marker in channel_markers):
-            return IntentType.CHANNELS
-
-        if any(marker in normalized for marker in service_markers):
-            return IntentType.SERVICE_DESCRIPTION
-
-        return IntentType.GENERAL_QUESTION
+        logger.info("Intent detected: %s | text=%s", intent, text)
+        return intent
