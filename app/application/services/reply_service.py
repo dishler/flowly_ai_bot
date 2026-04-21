@@ -50,20 +50,58 @@ class ReplyService:
     def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
         if language == "en":
             if intent == IntentType.PRICE:
-                return "Pricing starts from $300, depending on the scope. Want me to roughly estimate it for your case?"
+                return "Pricing starts from $300, depending on the scope. Want me to estimate the budget for your case or have a specialist follow up?"
             if intent == IntentType.CHANNELS:
-                return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. Which channel is your priority?"
+                return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. I can suggest the best channel mix for you, or a specialist can give you a quick consult."
             if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
-                return "We can quickly review your case and suggest the best setup. Would you like to move to a short consultation?"
-            return "We can set up automated replies, lead qualification, booking, and reminders in messengers. Want a quick example for your business type?"
+                return "We can quickly review your request and suggest the best implementation format. Would it be convenient if our specialist contacts you?"
+            return "We can set up automated replies, lead qualification, booking, and reminders in messengers. If you want, our specialist can briefly explain how this would look for your case."
 
         if intent == IntentType.PRICE:
-            return "Вартість стартує від 300$, але залежить від задач. Хочете, зорієнтую по бюджету під ваш кейс?"
+            return "Вартість стартує від 300$, але залежить від задач. Хочете, зорієнтую по бюджету під ваш кейс або передам ваш запит спеціалісту?"
         if intent == IntentType.CHANNELS:
-            return "Працюємо не лише з Instagram, а й з Facebook, WhatsApp і Telegram. Який канал для вас пріоритетний?"
+            return "Працюємо не лише з Instagram, а й з Facebook, WhatsApp і Telegram. Можу підказати, що краще підійде саме вам, або наш спеціаліст може коротко проконсультувати."
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
-            return "Можемо коротко обговорити ваш кейс і підказати, як це краще реалізувати. Зручно буде перейти до консультації?"
-        return "Можемо налаштувати автоматичні відповіді, кваліфікацію звернень, запис і нагадування в месенджерах. Хочете, коротко покажу, як це працює саме для вашої ніші?"
+            return "Можемо коротко обговорити ваш запит і підказати найкращий формат реалізації. Зручно, щоб із вами зв’язався наш спеціаліст?"
+        return "Можемо налаштувати автоматичні відповіді, кваліфікацію звернень, запис і нагадування в месенджерах. Якщо хочете, наш спеціаліст може коротко підказати, як це виглядатиме саме для вашого кейсу."
+
+    def get_escalation_reply(self, language: str) -> str:
+        if language == "en":
+            return "This is a more case-specific question. To give you an accurate answer, one of our specialists can follow up with you shortly."
+        return "Це вже більш індивідуальне питання. Щоб дати точну відповідь, з вами може коротко зв’язатися наш спеціаліст."
+
+    def should_escalate(self, user_text: str, history: List[str]) -> bool:
+        normalized = self._normalize(user_text)
+        technical_markers = [
+            "api",
+            "crm",
+            "integration",
+            "webhook",
+            "sdk",
+            "endpoint",
+            "інтеграція",
+            "техніч",
+            "кастом",
+            "custom",
+            "contract",
+            "legal",
+            "гаранті",
+            "догов",
+            "sla",
+        ]
+        complex_markers = [
+            "and also",
+            "також",
+            "і ще",
+            "plus",
+            "а ще",
+            "додатково",
+        ]
+        long_or_multipart = len(user_text) > 180 or user_text.count("?") > 1
+        has_technical = any(marker in normalized for marker in technical_markers)
+        has_complex = any(marker in normalized for marker in complex_markers)
+        too_many_turns = len(history) >= 6
+        return long_or_multipart or has_technical or has_complex or too_many_turns
 
     def enforce_response_policy(self, reply_text: str, user_text: str, intent: IntentType) -> str:
         language = self._detect_language(user_text)
@@ -79,20 +117,14 @@ class ReplyService:
         return any(marker in text for marker in markers)
 
     def _get_pricing_reply(self, language: str) -> str:
-        if language == "en":
-            return "Pricing starts from $300, depending on the scope. Want me to roughly estimate it for your case?"
-        return "Вартість стартує від 300$, але залежить від задач. Хочете, зорієнтую по бюджету під ваш кейс?"
+        return self._fallback_for_intent(IntentType.PRICE, language)
 
     def _get_channel_reply(self, text: str, language: str) -> Optional[str]:
         _ = text
-        if language == "en":
-            return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. Which channel is your priority?"
-        return "Працюємо не лише з Instagram, а й з Facebook, WhatsApp і Telegram. Який канал для вас пріоритетний?"
+        return self._fallback_for_intent(IntentType.CHANNELS, language)
 
     def _get_consultation_reply(self, language: str) -> str:
-        if language == "en":
-            return "We can quickly review your case and suggest the best setup. Would you like to move to a short consultation?"
-        return "Можемо коротко обговорити ваш кейс і підказати, як це краще реалізувати. Зручно буде перейти до консультації?"
+        return self._fallback_for_intent(IntentType.BOOKING_REQUEST, language)
 
     def _is_price_query(self, normalized: str) -> bool:
         price_markers = [

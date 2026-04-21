@@ -133,9 +133,11 @@ class MessageProcessor:
 
         booking_result = None
         reply_text = ""
+        routing_category = "answered_basic"
         intent = self.intent_service.detect_intent(message.user_message)
         intent_value = intent.value
         logger.info("Intent detected: %s", intent)
+        history = self.memory_service.get_history(message.sender_id)
 
         has_pending_confirmation = self.booking_service.has_pending_confirmation(message.sender_id)
         force_booking = self._looks_like_booking_message(message.user_message)
@@ -144,12 +146,17 @@ class MessageProcessor:
             intent = IntentType.BOOKING_REQUEST
             intent_value = intent.value
 
-        if intent == IntentType.BOOKING_REQUEST:
+        if self.reply_service.should_escalate(message.user_message, history):
+            language = self.reply_service._detect_language(message.user_message)
+            reply_text = self.reply_service.get_escalation_reply(language)
+            routing_category = "escalate_to_human"
+        elif intent == IntentType.BOOKING_REQUEST:
             booking_result = self.booking_service.handle_booking_request(
                 sender_id=message.sender_id,
                 message_text=message.user_message,
             )
             reply_text = booking_result["reply_text"]
+            routing_category = "consultation_cta"
 
         elif has_pending_confirmation:
             booking_result = self.booking_service.handle_booking_confirmation(
@@ -160,11 +167,26 @@ class MessageProcessor:
 
             if booking_result is not None:
                 reply_text = booking_result["reply_text"]
+                routing_category = "consultation_cta"
             else:
                 reply_text = self.reply_service.generate_reply(message, intent=intent)
+                if intent in {
+                    IntentType.PRICE,
+                    IntentType.CHANNELS,
+                    IntentType.SERVICE_DESCRIPTION,
+                }:
+                    routing_category = "consultation_cta"
 
         else:
             reply_text = self.reply_service.generate_reply(message, intent=intent)
+            if intent in {
+                IntentType.PRICE,
+                IntentType.CHANNELS,
+                IntentType.SERVICE_DESCRIPTION,
+                IntentType.BOOKING_REQUEST,
+                IntentType.CONSULTATION_INTEREST,
+            }:
+                routing_category = "consultation_cta"
 
         logger.info("Reply before guard: %s", reply_text)
         reply_text = self.reply_service.enforce_response_policy(
@@ -184,6 +206,7 @@ class MessageProcessor:
 
         return {
             "intent": intent_value,
+            "routing_category": routing_category,
             "reply_text": reply_text,
             "history": self.memory_service.get_history(message.sender_id),
             "booking_result": booking_result,
