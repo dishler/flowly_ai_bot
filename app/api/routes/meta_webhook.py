@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Optional
 
+import httpx
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.application.dto.normalized_message import NormalizedMessage
+from app.core.config import get_settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 def _safe_get(data: Any, *keys: Any) -> Any:
@@ -72,6 +76,54 @@ def _extract_audio_url(payload: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _extract_audio_media_id(payload: dict[str, Any]) -> Optional[str]:
+    candidates = [
+        _safe_get(payload, "entry", 0, "messaging", 0, "message", "attachments", 0, "payload", "id"),
+        _safe_get(payload, "entry", 0, "messaging", 0, "message", "attachments", 0, "target", "id"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "audio", "id"),
+        _safe_get(payload, "entry", 0, "changes", 0, "value", "messages", 0, "voice", "id"),
+        _safe_get(payload, "audio", "id"),
+        _safe_get(payload, "voice", "id"),
+    ]
+
+    for value in candidates:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+
+    return None
+
+
+def get_media_url(media_id: str) -> str:
+    if not media_id:
+        return ""
+
+    if not settings.meta_page_access_token:
+        logger.warning("Cannot resolve media URL: META_PAGE_ACCESS_TOKEN is empty")
+        return ""
+
+    url = f"https://graph.facebook.com/{settings.meta_graph_api_version}/{media_id}"
+    params = {
+        "fields": "url",
+        "access_token": settings.meta_page_access_token,
+    }
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        logger.exception("Failed to resolve media URL for media_id=%s: %s", media_id, exc)
+        return ""
+
+    resolved_url = data.get("url")
+    if isinstance(resolved_url, str) and resolved_url.strip():
+        return resolved_url.strip()
+
+    logger.warning("Graph API did not return media url for media_id=%s", media_id)
+    return ""
+
+
 def _extract_sender_id(payload: dict[str, Any]) -> str:
     """Extract sender/user id from common Meta webhook shapes."""
     candidates = [
@@ -131,6 +183,11 @@ def _extract_platform(payload: dict[str, Any]) -> str:
 def _build_normalized_message(payload: dict[str, Any]) -> NormalizedMessage:
     user_message = _extract_text(payload)
     audio_url = _extract_audio_url(payload)
+    if not audio_url:
+        media_id = _extract_audio_media_id(payload)
+        if media_id:
+            audio_url = get_media_url(media_id)
+            logger.info("Resolved audio URL from media_id=%s: %s", media_id, bool(audio_url))
     sender_id = _extract_sender_id(payload)
     recipient_id = _extract_recipient_id(payload)
     message_mid = _extract_message_mid(payload)
@@ -180,6 +237,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         logger.exception("Invalid webhook JSON payload")
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
 
+    logger.info("FULL META PAYLOAD: %s", json.dumps(payload, indent=2, ensure_ascii=False, default=str))
     logger.info("Meta webhook payload received: %s", jsonable_encoder(payload))
 
     message_processor = getattr(request.app.state, "message_processor", None)
@@ -203,6 +261,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         bool(message.user_message),
         bool(message.audio_url),
     )
+    logger.info("audio_url resolved: %s", message.audio_url)
 
     if not message.user_message and not message.audio_url:
         return {
@@ -221,6 +280,8 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
             "detail": str(exc),
         }
     logger.info("message_processor.process completed for sender_id=%s", message.sender_id)
+    if message.audio_url:
+        logger.info("transcription result: %s", message.user_message)
 
     safe_result = jsonable_encoder(result)
 
