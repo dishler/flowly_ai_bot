@@ -83,6 +83,8 @@ class BookingService:
         description: str | None = None,
         contact_email: str | None = None,
         contact_phone: str | None = None,
+        source_channel: str | None = None,
+        context_summary: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "state": state.value,
@@ -92,6 +94,8 @@ class BookingService:
             "description": description or f"Booked via Flowly Meta Bot. Sender ID: {sender_id}",
             "contact_email": contact_email,
             "contact_phone": contact_phone,
+            "source_channel": source_channel,
+            "context_summary": context_summary,
         }
         if start_dt is not None:
             payload["start_dt"] = self._serialize_pending_start_dt(start_dt)
@@ -142,19 +146,18 @@ class BookingService:
             formatted = start_dt.strftime("%d.%m о %H:%M")
             return (
                 f"Супер, слот {formatted} вільний. "
-                "Щоб підтвердити дзвінок, залиште, будь ласка, номер телефону або email. "
-                "Якщо зручніше, можемо надіслати запрошення в календар."
+                "Щоб підтвердити дзвінок, залиште, будь ласка, номер телефону або email."
             )
         formatted = start_dt.strftime("%d.%m at %H:%M")
         return (
             f"Great, the {formatted} slot is available. To confirm the call, please share your "
-            "phone number or email. If it's easier, we can send a calendar invite."
+            "phone number or email."
         )
 
     def _build_confirmed_reply(self, language: str) -> str:
         if language == "uk":
-            return "Готово, бронювання підтверджено."
-        return "Done, your booking is confirmed."
+            return "Дякую, дзвінок підтверджено. Ми зв’яжемося з вами у зазначений час."
+        return "Thank you, your call is confirmed. We will contact you at the scheduled time."
 
     def _build_cancelled_reply(self, language: str) -> str:
         if language == "uk":
@@ -168,40 +171,24 @@ class BookingService:
 
     def _build_contact_retry_reply(self, language: str) -> str:
         if language == "uk":
-            return (
-                "Щоб підтвердити дзвінок, потрібен номер телефону або email. "
-                "Надішліть, будь ласка, один із цих контактів."
-            )
+            return "Щоб підтвердити дзвінок, залиште, будь ласка, номер телефону або email."
         return (
-            "To confirm the call, I need either your phone number or email. "
-            "Please send one of those contact details."
+            "To confirm the call, please share your phone number or email."
         )
 
     def _build_email_confirmed_reply(self, language: str) -> str:
         if language == "uk":
-            return "Дякую, дзвінок підтверджено. Запрошення надіслано на ваш email."
-        return "Thank you, your call is confirmed. The invite has been sent to your email."
+            return "Дякую, дзвінок підтверджено. Ми зв’яжемося з вами у зазначений час."
+        return "Thank you, your call is confirmed. We will contact you at the scheduled time."
 
     def _build_phone_handoff_reply(self, language: str) -> str:
-        if language == "uk":
-            return "Дякую. Передам ваш контакт спеціалісту, і він зв’яжеться з вами найближчим часом щодо дзвінка."
-        return "Thank you. I will pass your contact to our specialist, and they will reach out shortly regarding the call."
+        return self._build_confirmed_reply(language)
 
     def _build_both_contacts_confirmed_reply(self, language: str) -> str:
-        if language == "uk":
-            return "Дякую, дзвінок підтверджено. Запрошення надіслано на ваш email, а контакт передано спеціалісту."
-        return "Thank you, your call is confirmed. The invite has been sent to your email, and your contact has been passed to our specialist."
+        return self._build_confirmed_reply(language)
 
     def _build_create_failed_reply(self, language: str) -> str:
-        if language == "uk":
-            return (
-                "Дякую. Не вдалося автоматично створити запис у календарі, але я передам ваш "
-                "запит спеціалісту, і він зв’яжеться з вами найближчим часом для підтвердження дзвінка."
-            )
-        return (
-            "Thank you. I could not create the calendar booking automatically, but I will pass "
-            "your request to our specialist, and they will contact you shortly to confirm the call."
-        )
+        return self._build_confirmed_reply(language)
 
     def _normalize_phone(self, raw_phone: str) -> str:
         compact = re.sub(r"[^\d+]", "", raw_phone.strip())
@@ -362,7 +349,12 @@ class BookingService:
     def handle_booking_request(self, sender_id: str, message_text: str) -> Dict[str, Any]:
         return self.start_booking_flow(sender_id=sender_id, message_text=message_text)
 
-    def start_booking_flow(self, sender_id: str, message_text: str) -> Dict[str, Any]:
+    def start_booking_flow(
+        self,
+        sender_id: str,
+        message_text: str,
+        source_channel: str | None = None,
+    ) -> Dict[str, Any]:
         language = self._detect_language(message_text)
         requested_dt = self._parse_requested_datetime(message_text)
 
@@ -374,6 +366,8 @@ class BookingService:
                 sender_id,
                 state=BookingState.WAITING_FOR_TIME,
                 language=language,
+                source_channel=source_channel,
+                context_summary=message_text[:280],
             )
             return {
                 "status": "waiting_for_time",
@@ -411,6 +405,8 @@ class BookingService:
             state=BookingState.WAITING_FOR_CONTACT,
             language=language,
             start_dt=requested_dt,
+            source_channel=source_channel,
+            context_summary=message_text[:280],
         )
 
         return {
@@ -425,7 +421,12 @@ class BookingService:
     def handle_booking_confirmation(self, sender_id: str, message_text: str) -> Dict[str, Any] | None:
         return self.process_booking_message(sender_id=sender_id, message_text=message_text)
 
-    def process_booking_message(self, sender_id: str, message_text: str) -> Dict[str, Any] | None:
+    def process_booking_message(
+        self,
+        sender_id: str,
+        message_text: str,
+        source_channel: str | None = None,
+    ) -> Dict[str, Any] | None:
         pending = self._get_pending_confirmation(sender_id)
         if not pending:
             return None
@@ -445,7 +446,11 @@ class BookingService:
             }
 
         if state == BookingState.WAITING_FOR_TIME:
-            return self.start_booking_flow(sender_id=sender_id, message_text=message_text)
+            return self.start_booking_flow(
+                sender_id=sender_id,
+                message_text=message_text,
+                source_channel=source_channel or pending.get("source_channel"),
+            )
 
         if state == BookingState.WAITING_FOR_CONTACT:
             contact_details = self._extract_contact_details(message_text)
@@ -469,30 +474,8 @@ class BookingService:
             pending["contact_phone"] = contact_details["phone"]
             pending["state"] = BookingState.CONFIRMATION.value
 
-            if contact_details["has_phone"] and not contact_details["has_email"]:
-                try:
-                    start_dt = self._deserialize_pending_start_dt(pending["start_dt"])
-                except Exception:
-                    start_dt = None
-                self._save_captured_contact(
-                    sender_id,
-                    email=None,
-                    phone=contact_details["phone"],
-                    start_dt=start_dt,
-                )
-                self._clear_pending_confirmation(sender_id)
-                return {
-                    "status": "contact_shared_phone",
-                    "reply_text": self._build_phone_handoff_reply(language),
-                    "event_created": False,
-                    "requires_contact": False,
-                    "booking_state": BookingState.NONE.value,
-                    "contact_phone": contact_details["phone"],
-                }
-
-            attendee_emails = [contact_details["email"]] if contact_details["email"] else []
         elif state == BookingState.CONFIRMATION:
-            attendee_emails = [pending["contact_email"]] if pending.get("contact_email") else []
+            pass
         else:
             return None
 
@@ -540,7 +523,7 @@ class BookingService:
                 "booking_state": BookingState.NONE.value,
             }
 
-        if attendee_emails and not self.calendar_service.google_calendar_client:
+        if not self.calendar_service.google_calendar_client:
             return self._build_manual_followup_result(
                 sender_id=sender_id,
                 language=language,
@@ -549,7 +532,7 @@ class BookingService:
                 phone=pending.get("contact_phone"),
             )
 
-        if attendee_emails and not self.calendar_service.google_calendar_client.is_configured():
+        if not self.calendar_service.google_calendar_client.is_configured():
             logger.warning(
                 "Google Calendar is not configured; switching to manual follow-up sender_id=%s",
                 sender_id,
@@ -563,22 +546,28 @@ class BookingService:
             )
 
         try:
-            description = pending["description"]
-            if pending.get("contact_email") or pending.get("contact_phone"):
-                contact_parts = []
-                if pending.get("contact_email"):
-                    contact_parts.append(f"Email: {pending['contact_email']}")
-                if pending.get("contact_phone"):
-                    contact_parts.append(f"Phone: {pending['contact_phone']}")
-                description = f"{description}\nContact: {' | '.join(contact_parts)}"
+            description_parts = [pending["description"], f"Sender ID: {sender_id}"]
+            if pending.get("source_channel"):
+                description_parts.append(f"Source: {pending['source_channel']}")
+            if pending.get("context_summary"):
+                description_parts.append(f"Context: {pending['context_summary']}")
+            contact_parts = []
+            if pending.get("contact_email"):
+                contact_parts.append(f"Email: {pending['contact_email']}")
+            if pending.get("contact_phone"):
+                contact_parts.append(f"Phone: {pending['contact_phone']}")
+            if contact_parts:
+                description_parts.append("Contact: " + " | ".join(contact_parts))
+            description = "\n".join(description_parts)
 
             created = self.calendar_service.create_booking_event(
                 start_dt=start_dt,
                 duration_minutes=pending["duration_minutes"],
                 summary=pending["summary"],
                 description=description,
-                attendee_emails=attendee_emails,
+                attendee_emails=[],
             )
+            logger.info("Calendar event created")
         except Exception:
             logger.exception("Booking creation failed")
             logger.exception(

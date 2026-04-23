@@ -167,11 +167,27 @@ class ReplyService:
     def _contains_any(self, text: str, markers: List[str]) -> bool:
         return any(marker in text for marker in markers)
 
+    def _get_faq_answer(self, question_uk: str, language: str) -> Optional[str]:
+        faq_items = self.knowledge_service.get_all_faq() or []
+        for item in faq_items:
+            if item.get("question") == question_uk:
+                key = "answer_en" if language == "en" else "answer_uk"
+                answer = item.get(key)
+                if answer:
+                    return str(answer)
+        return None
+
     def _get_pricing_reply(self, language: str) -> str:
+        faq_answer = self._get_faq_answer("Скільки це коштує?", language)
+        if faq_answer:
+            return faq_answer
         return self._fallback_for_intent(IntentType.PRICE, language)
 
     def _get_channel_reply(self, text: str, language: str) -> Optional[str]:
         _ = text
+        faq_answer = self._get_faq_answer("З якими каналами ви працюєте?", language)
+        if faq_answer:
+            return faq_answer
         return self._fallback_for_intent(IntentType.CHANNELS, language)
 
     def _get_consultation_reply(self, language: str) -> str:
@@ -463,7 +479,29 @@ class ReplyService:
 
         return " ".join(parts)
 
-    def _get_service_description_fallback_reply(self, language: str) -> str:
+    def _is_service_includes_query(self, normalized: str) -> bool:
+        includes_markers = [
+            "що входить",
+            "що входить у сервіс",
+            "що входить в сервіс",
+            "що включено",
+            "what is included",
+            "what's included",
+            "what does the service include",
+        ]
+        return self._contains_any(normalized, includes_markers)
+
+    def _get_service_description_fallback_reply(
+        self,
+        language: str,
+        user_text: Optional[str] = None,
+    ) -> str:
+        normalized = self._normalize(user_text or "")
+        if normalized and self._is_service_includes_query(normalized):
+            faq_answer = self._get_faq_answer("Що входить у сервіс?", language)
+            if faq_answer:
+                return faq_answer
+
         service = self.knowledge_service.get_service_by_id("ai_dm_bot") or {}
         short_description = service.get("short_description", "")
         includes = service.get("includes", [])
@@ -476,7 +514,7 @@ class ReplyService:
                 parts.append(
                     "Ми налаштовуємо AI-бота, який відповідає на типові звернення, допомагає кваліфікувати заявки та веде клієнта до запису."
                 )
-            if includes:
+            if includes and normalized and self._is_service_includes_query(normalized):
                 parts.append("У сервіс зазвичай входить " + ", ".join(includes[:4]) + ".")
             return " ".join(parts)
 
@@ -487,9 +525,51 @@ class ReplyService:
             parts.append(
                 "We set up an AI bot that handles common inbound questions, helps qualify leads, and guides clients toward booking."
             )
-        if includes:
+        if includes and normalized and self._is_service_includes_query(normalized):
             parts.append("The service usually includes " + ", ".join(includes[:4]) + ".")
         return " ".join(parts)
+
+    def _get_niche_fit_reply(self, normalized: str, language: str) -> Optional[str]:
+        niche_markers = {
+            "dentistry": [
+                "стоматолог",
+                "стоматологія",
+                "стоматологии",
+                "dental",
+                "dentistry",
+            ],
+            "clinic": [
+                "клінік",
+                "клиник",
+                "clinic",
+            ],
+        }
+
+        matched_dentistry = self._contains_any(normalized, niche_markers["dentistry"])
+        matched_clinic = self._contains_any(normalized, niche_markers["clinic"])
+        if not matched_dentistry and not matched_clinic:
+            return None
+
+        if language == "en":
+            if matched_dentistry:
+                return (
+                    "Yes, it is a good fit for dental practices. The bot can help with booking, "
+                    "answer common patient questions, and send visit reminders."
+                )
+            return (
+                "Yes, it is a good fit for clinics. The bot can help with booking, answer common "
+                "questions, and remind clients about upcoming visits."
+            )
+
+        if matched_dentistry:
+            return (
+                "Так, добре підходить для стоматологій — бот може допомагати з записом, "
+                "відповідати на типові питання і нагадувати про візити."
+            )
+        return (
+            "Так, добре підходить для клінік — бот може допомагати з записом, відповідати на "
+            "типові питання і нагадувати про візити."
+        )
 
     def _generate_service_ai_reply(
         self,
@@ -552,13 +632,17 @@ class ReplyService:
             return self._fallback_for_intent(IntentType.CHANNELS, language)
 
         if resolved_intent == IntentType.SERVICE_DESCRIPTION:
-            return self._fallback_for_intent(IntentType.SERVICE_DESCRIPTION, language)
+            return self._get_service_description_fallback_reply(language, text)
 
         if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
             return self._get_consultation_reply(language)
 
         if self._is_greeting(normalized):
             return self._get_greeting_reply(language)
+
+        niche_fit_reply = self._get_niche_fit_reply(normalized, language)
+        if niche_fit_reply:
+            return niche_fit_reply
 
         if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
             history = self.memory_service.get_history(message.sender_id)

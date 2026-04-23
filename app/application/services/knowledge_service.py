@@ -33,6 +33,9 @@ class KnowledgeService:
     def get_faq(self) -> list[dict[str, Any]]:
         return self.data.get("faq", [])
 
+    def get_all_faq(self) -> list[dict[str, Any]]:
+        return self.get_faq()
+
     def find_faq_answer(self, question_text: str, language: str = "uk") -> Optional[str]:
         normalized = question_text.strip().lower()
         for item in self.get_faq():

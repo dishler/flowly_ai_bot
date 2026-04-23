@@ -104,6 +104,26 @@ class MessageProcessor:
 
         return ""
 
+    def _is_first_assistant_reply(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        return not any(item.startswith("assistant:") for item in history)
+
+    def _prepend_first_greeting_if_needed(self, sender_id: str, user_text: str, reply_text: str) -> str:
+        if not reply_text.strip():
+            return reply_text
+        if not self._is_first_assistant_reply(sender_id):
+            return reply_text
+
+        language = self.reply_service.detect_user_language(user_text)
+        if language == "en":
+            prefix = "Hi! "
+        else:
+            prefix = "Привіт! "
+
+        if reply_text.startswith(prefix):
+            return reply_text
+        return f"{prefix}{reply_text}"
+
     async def process(self, message: NormalizedMessage) -> Dict[str, Any]:
         message_mid = (getattr(message, "message_mid", "") or "").strip()
         if message_mid:
@@ -151,9 +171,11 @@ class MessageProcessor:
             booking_result = self.booking_service.process_booking_message(
                 sender_id=message.sender_id,
                 message_text=message.user_message,
+                source_channel=message.platform,
             )
             intent_value = "booking_flow"
             if booking_result is not None:
+                logger.info("Booking result used")
                 reply_text = booking_result["reply_text"]
                 routing_category = "consultation_cta"
             else:
@@ -212,7 +234,9 @@ class MessageProcessor:
             booking_result = self.booking_service.start_booking_flow(
                 sender_id=message.sender_id,
                 message_text=message.user_message,
+                source_channel=message.platform,
             )
+            logger.info("Booking result used")
             reply_text = booking_result["reply_text"]
             routing_category = "consultation_cta"
 
@@ -237,11 +261,20 @@ class MessageProcessor:
                 routing_category = "consultation_cta"
 
         logger.info("Reply before guard: %s", reply_text)
+        if booking_result is not None:
+            logger.info("Booking result used")
+            reply_text = booking_result["reply_text"]
         reply_text = self.reply_service.enforce_response_policy(
             reply_text=reply_text,
             user_text=message.user_message,
             intent=intent,
         )
+        if booking_result is None:
+            reply_text = self._prepend_first_greeting_if_needed(
+                sender_id=message.sender_id,
+                user_text=message.user_message,
+                reply_text=reply_text,
+            )
         logger.info("Reply after guard: %s", reply_text)
 
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
