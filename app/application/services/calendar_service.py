@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -91,6 +91,7 @@ class CalendarService:
         duration_minutes: int = 30,
         summary: str = "Consultation call",
         description: str = "",
+        attendee_emails: Optional[List[str]] = None,
     ) -> CreatedCalendarEvent:
         if not self.google_calendar_client or not self.google_calendar_client.is_configured():
             raise RuntimeError("Google Calendar is not configured for event creation.")
@@ -105,5 +106,6 @@ class CalendarService:
             end_dt=end_dt,
             summary=summary,
             description=description,
+            attendee_emails=attendee_emails or [],
         )
         

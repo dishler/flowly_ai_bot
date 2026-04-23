@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -221,6 +221,7 @@ class GoogleCalendarClient:
         end_dt: datetime,
         summary: str,
         description: str = "",
+        attendee_emails: List[str] | None = None,
     ) -> CreatedCalendarEvent:
         if end_dt <= start_dt:
             raise GoogleCalendarClientError("end_dt must be after start_dt")
@@ -240,18 +241,26 @@ class GoogleCalendarClient:
                     "timeZone": self.timezone,
                 },
             }
+            attendees = [{"email": email} for email in (attendee_emails or []) if email]
+            if attendees:
+                event_body["attendees"] = attendees
 
             logger.info(
-                "calendar create_event start calendar_id=%s start_dt=%s end_dt=%s summary=%r",
+                "calendar create_event start calendar_id=%s start_dt=%s end_dt=%s summary=%r attendees=%s",
                 self.calendar_id,
                 start_dt.isoformat(),
                 end_dt.isoformat(),
                 summary,
+                len(attendees),
             )
 
             created = (
                 service.events()
-                .insert(calendarId=self.calendar_id, body=event_body)
+                .insert(
+                    calendarId=self.calendar_id,
+                    body=event_body,
+                    sendUpdates="all" if attendees else "none",
+                )
                 .execute()
             )
 
