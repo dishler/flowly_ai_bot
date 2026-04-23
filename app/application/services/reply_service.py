@@ -52,7 +52,7 @@ class ReplyService:
             if intent == IntentType.PRICE:
                 return "Pricing starts from $300, depending on the scope. Want me to estimate the budget for your case or have a specialist follow up?"
             if intent == IntentType.CHANNELS:
-                return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. I can suggest the best channel mix for you, or a specialist can give you a quick consult."
+                return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. If you want, I can suggest which channel would fit your case best."
             if intent == IntentType.SERVICE_DESCRIPTION:
                 return self._get_service_description_fallback_reply(language)
             if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
@@ -73,6 +73,41 @@ class ReplyService:
         if language == "en":
             return "This is a more case-specific question. To give you an accurate answer, one of our specialists can follow up with you shortly."
         return "Це вже більш індивідуальне питання. Щоб дати точну відповідь, можу запропонувати вам короткий дзвінок з нашим спеціалістом. Що скажете?"
+
+    def _is_complex_query(self, normalized: str) -> bool:
+        complex_markers = [
+            "crm",
+            "api",
+            "інтеграц",
+            "integration",
+            "custom",
+            "кастом",
+            "філі",
+            "branches",
+            "branch",
+            "enterprise",
+            "логік",
+            "logic",
+            "кілька",
+            "multiple",
+            "system",
+            "workflow",
+        ]
+        return self._contains_any(normalized, complex_markers)
+
+    def get_contextual_complex_reply(self, user_text: str, language: str) -> str:
+        normalized = self._normalize(user_text)
+        if self._is_complex_query(normalized):
+            if language == "en":
+                return (
+                    "Cases like this usually depend on your workflow logic, CRM, integrations, "
+                    "and the number of branches. To give you an accurate answer, I can suggest a short call with our specialist. What do you think?"
+                )
+            return (
+                "Такі кейси вже залежать від вашої логіки роботи, CRM і кількості філій. "
+                "Щоб дати точну відповідь, можу запропонувати вам короткий дзвінок з нашим спеціалістом. Що скажете?"
+            )
+        return self.get_escalation_reply(language)
 
     def detect_user_language(self, text: str) -> str:
         return self._detect_language(text)
@@ -298,12 +333,15 @@ class ReplyService:
             return "basic", "greeting"
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
             return "mid", intent.value
-        if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
-            return "mid", "known_product_question"
+        if self._is_complex_query(normalized):
+            return "complex", "complex_keywords_detected"
 
         should_escalate, reason = self.evaluate_escalation(user_text, history)
         if should_escalate:
             return "complex", reason
+
+        if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
+            return "mid", "known_product_question"
 
         return "mid", "general_non_complex"
 

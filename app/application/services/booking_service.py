@@ -31,6 +31,7 @@ class BookingService:
         self.timezone = ZoneInfo(settings.default_timezone)
         self.pending_confirmations: dict[str, dict[str, Any]] = {}
         self.captured_contacts: dict[str, dict[str, Any]] = {}
+        self.completed_bookings: dict[str, dict[str, Any]] = {}
 
     def has_pending_confirmation(self, sender_id: str) -> bool:
         if self.booking_state_service is not None:
@@ -242,6 +243,28 @@ class BookingService:
             "start_dt": self._serialize_pending_start_dt(start_dt) if start_dt else None,
         }
 
+    def has_confirmed_booking(self, sender_id: str) -> bool:
+        return sender_id in self.completed_bookings
+
+    def _mark_booking_completed(
+        self,
+        sender_id: str,
+        *,
+        start_dt: datetime | None,
+        email: str | None,
+        phone: str | None,
+    ) -> None:
+        self.completed_bookings[sender_id] = {
+            "start_dt": self._serialize_pending_start_dt(start_dt) if start_dt else None,
+            "email": email,
+            "phone": phone,
+        }
+
+    def get_reschedule_reply(self, language: str) -> str:
+        if language == "en":
+            return "You already have a confirmed call. If you want, I can help you move it to a different time."
+        return "У вас уже є підтверджений дзвінок. Якщо хочете, можу допомогти перенести його на інший час."
+
     def _build_manual_followup_result(
         self,
         *,
@@ -256,6 +279,12 @@ class BookingService:
             email=email,
             phone=phone,
             start_dt=start_dt,
+        )
+        self._mark_booking_completed(
+            sender_id,
+            start_dt=start_dt,
+            email=email,
+            phone=phone,
         )
         self._clear_pending_confirmation(sender_id)
         return {
@@ -589,6 +618,12 @@ class BookingService:
             email=pending.get("contact_email"),
             phone=pending.get("contact_phone"),
             start_dt=start_dt,
+        )
+        self._mark_booking_completed(
+            sender_id,
+            start_dt=start_dt,
+            email=pending.get("contact_email"),
+            phone=pending.get("contact_phone"),
         )
         self._clear_pending_confirmation(sender_id)
 

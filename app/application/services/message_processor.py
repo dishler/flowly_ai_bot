@@ -86,10 +86,43 @@ class MessageProcessor:
         if has_consultation and (has_date_word or has_time):
             return True
 
-        if has_date_word and has_time:
-            return True
-
         return False
+
+    def _looks_like_datetime_only_message(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        date_words = [
+            "today",
+            "tomorrow",
+            "day after tomorrow",
+            "сьогодні",
+            "завтра",
+            "післязавтра",
+        ]
+        has_date_word = any(word in normalized for word in date_words)
+        has_time = bool(
+            re.search(r"\b([01]?\d|2[0-3]):[0-5]\d\b", normalized)
+            or re.search(r"\b(10|11|12|13|14|15|16|17|18|19|20|21|22|23)\b", normalized)
+            or re.search(r"\b(о|на|at)\s*(10|11|12|13|14|15|16|17|18|19|20|21|22|23)\b", normalized)
+        )
+        return has_date_word and has_time
+
+    def _looks_like_reschedule_request(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        markers = [
+            "перенести",
+            "перенес",
+            "змінити час",
+            "змінити дату",
+            "інший час",
+            "іншу дату",
+            "reschedule",
+            "move the call",
+            "change the time",
+            "change the date",
+            "book again",
+            "записати знову",
+        ]
+        return any(marker in normalized for marker in markers)
 
     async def _resolve_message_text(self, message: NormalizedMessage) -> str:
         user_message = (getattr(message, "user_message", "") or "").strip()
@@ -108,6 +141,12 @@ class MessageProcessor:
         history = self.memory_service.get_history(sender_id)
         return not any(item.startswith("assistant:") for item in history)
 
+    def _has_greeting_prefix(self, reply_text: str, language: str) -> bool:
+        normalized = reply_text.lstrip()
+        if language == "en":
+            return normalized.startswith("Hi!") or normalized.startswith("Hello!")
+        return normalized.startswith("Привіт!")
+
     def _prepend_first_greeting_if_needed(self, sender_id: str, user_text: str, reply_text: str) -> str:
         if not reply_text.strip():
             return reply_text
@@ -120,9 +159,17 @@ class MessageProcessor:
         else:
             prefix = "Привіт! "
 
-        if reply_text.startswith(prefix):
+        if self._has_greeting_prefix(reply_text, language):
             return reply_text
         return f"{prefix}{reply_text}"
+
+    def _finalize_general_reply_text(self, sender_id: str, user_text: str, reply_text: str) -> str:
+        finalized = self._prepend_first_greeting_if_needed(
+            sender_id=sender_id,
+            user_text=user_text,
+            reply_text=reply_text,
+        )
+        return finalized
 
     async def process(self, message: NormalizedMessage) -> Dict[str, Any]:
         message_mid = (getattr(message, "message_mid", "") or "").strip()
@@ -205,6 +252,35 @@ class MessageProcessor:
                 "outbound_result": outbound_result,
             }
 
+        if (
+            booking_state == BookingState.NONE
+            and self.booking_service.has_confirmed_booking(message.sender_id)
+            and self._looks_like_datetime_only_message(message.user_message)
+            and not self._looks_like_reschedule_request(message.user_message)
+        ):
+            reply_text = self.booking_service.get_reschedule_reply(
+                self.reply_service.detect_user_language(message.user_message)
+            )
+            reply_text = self.reply_service.enforce_response_policy(
+                reply_text=reply_text,
+                user_text=message.user_message,
+                intent=IntentType.BOOKING_REQUEST,
+            )
+            self.memory_service.add_assistant_message(message.sender_id, reply_text)
+            outbound_result = self.outbound_service.send_reply(
+                platform=message.platform,
+                recipient_id=message.sender_id,
+                text=reply_text,
+            )
+            return {
+                "intent": "post_booking_reschedule_prompt",
+                "routing_category": "consultation_cta",
+                "reply_text": reply_text,
+                "history": self.memory_service.get_history(message.sender_id),
+                "booking_result": None,
+                "outbound_result": outbound_result,
+            }
+
         intent = self.intent_service.detect_intent(message.user_message)
         intent_value = intent.value
         logger.info("Intent detected: %s", intent)
@@ -243,7 +319,10 @@ class MessageProcessor:
         elif question_level == "complex":
             logger.info("Escalation triggered: %s", question_reason)
             language = self.reply_service.detect_user_language(message.user_message)
-            reply_text = self.reply_service.get_escalation_reply(language)
+            reply_text = self.reply_service.get_contextual_complex_reply(
+                message.user_message,
+                language,
+            )
             routing_category = "escalate_to_human"
 
         elif intent not in _STANDARD_SALES_INTENTS:
@@ -270,7 +349,7 @@ class MessageProcessor:
             intent=intent,
         )
         if booking_result is None:
-            reply_text = self._prepend_first_greeting_if_needed(
+            reply_text = self._finalize_general_reply_text(
                 sender_id=message.sender_id,
                 user_text=message.user_message,
                 reply_text=reply_text,
