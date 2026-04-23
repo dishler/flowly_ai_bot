@@ -68,7 +68,7 @@ class ReplyService:
     def get_escalation_reply(self, language: str) -> str:
         if language == "en":
             return "This is a more case-specific question. To give you an accurate answer, one of our specialists can follow up with you shortly."
-        return "Це вже більш індивідуальне питання. Щоб дати точну відповідь, з вами може коротко зв’язатися наш спеціаліст."
+        return "Це вже більш індивідуальне питання. Щоб дати точну відповідь, можу запропонувати вам короткий дзвінок з нашим спеціалістом. Що скажете?"
 
     def detect_user_language(self, text: str) -> str:
         return self._detect_language(text)
@@ -192,7 +192,10 @@ class ReplyService:
     def _is_service_query(self, normalized: str) -> bool:
         service_markers = [
             "що це",
+            "чим займаєтесь",
+            "чим ви займаєтесь",
             "що ви робите",
+            "що робите",
             "як це працює",
             "що входить",
             "що входить у сервіс",
@@ -217,6 +220,85 @@ class ReplyService:
             "what exactly do you do",
         ]
         return self._contains_any(normalized, service_markers)
+
+    def _is_greeting(self, normalized: str) -> bool:
+        greeting_markers = [
+            "привіт",
+            "доброго дня",
+            "добрий день",
+            "добрий вечір",
+            "вітаю",
+            "hello",
+            "hi",
+            "hey",
+            "good morning",
+            "good afternoon",
+            "good evening",
+        ]
+        return self._contains_any(normalized, greeting_markers)
+
+    def _is_mid_level_query(self, normalized: str) -> bool:
+        mid_level_markers = [
+            "як це працює",
+            "як працює",
+            "як швидко запуск",
+            "як швидко можна запустити",
+            "чи підійде",
+            "чи підходить",
+            "для клініки",
+            "для стоматології",
+            "для салону",
+            "для бізнесу",
+            "for clinic",
+            "for dental clinic",
+            "is it suitable",
+            "how does it work",
+            "how fast",
+            "how quickly can you launch",
+            "how long does launch take",
+        ]
+        return self._contains_any(normalized, mid_level_markers)
+
+    def classify_question_level(
+        self,
+        user_text: str,
+        intent: IntentType,
+        history: List[str],
+    ) -> Tuple[str, str]:
+        normalized = self._normalize(user_text)
+
+        basic_intents = {
+            IntentType.PRICE,
+            IntentType.CHANNELS,
+            IntentType.SERVICE_DESCRIPTION,
+        }
+        if intent in basic_intents:
+            return "basic", intent.value
+        if self._is_greeting(normalized):
+            return "basic", "greeting"
+        if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
+            return "mid", intent.value
+        if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
+            return "mid", "known_product_question"
+
+        should_escalate, reason = self.evaluate_escalation(user_text, history)
+        if should_escalate:
+            return "complex", reason
+
+        return "mid", "general_non_complex"
+
+    def _get_greeting_reply(self, language: str) -> str:
+        if language == "en":
+            return (
+                "Hello! We set up AI bots for Instagram, Facebook, WhatsApp, and Telegram "
+                "so businesses can reply to clients 24/7 and guide them toward booking. "
+                "If you want, I can briefly explain how this could work in your case."
+            )
+        return (
+            "Привіт! Ми налаштовуємо AI-ботів для Instagram, Facebook, WhatsApp і Telegram, "
+            "щоб бізнес відповідав клієнтам 24/7 і доводив їх до запису. Хочете, коротко "
+            "підкажу, як це може працювати у вашому випадку?"
+        )
 
     def _is_consultation_query(self, normalized: str) -> bool:
         consultation_markers = [
@@ -426,6 +508,7 @@ class ReplyService:
         text = message.user_message.strip()
         language = self._detect_language(text)
         resolved_intent = intent or IntentType.GENERAL_QUESTION
+        normalized = self._normalize(text)
 
         if resolved_intent == IntentType.PRICE:
             return self._get_pricing_reply(language)
@@ -441,6 +524,17 @@ class ReplyService:
 
         if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
             return self._get_consultation_reply(language)
+
+        if self._is_greeting(normalized):
+            return self._get_greeting_reply(language)
+
+        if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
+            history = self.memory_service.get_history(message.sender_id)
+            return self._generate_service_ai_reply(
+                user_message=text,
+                history=history,
+                language=language,
+            )
 
         # Unknown intent fallback only.
         return self._fallback_for_intent(IntentType.SERVICE_DESCRIPTION, language)

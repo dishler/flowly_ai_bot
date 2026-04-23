@@ -148,6 +148,13 @@ class MessageProcessor:
         intent_value = intent.value
         logger.info("Intent detected: %s", intent)
         history = self.memory_service.get_history(message.sender_id)
+        question_level, question_reason = self.reply_service.classify_question_level(
+            user_text=message.user_message,
+            intent=intent,
+            history=history,
+        )
+        logger.info("Question level: %s", question_level)
+        logger.debug("Question level reason: %s", question_reason)
 
         has_pending_confirmation = self.booking_service.has_pending_confirmation(message.sender_id)
         force_booking = self._looks_like_booking_message(message.user_message)
@@ -155,6 +162,10 @@ class MessageProcessor:
         if force_booking and intent != IntentType.BOOKING_REQUEST:
             intent = IntentType.BOOKING_REQUEST
             intent_value = intent.value
+            question_level = "mid"
+            question_reason = "forced_booking_pattern"
+            logger.info("Question level: %s", question_level)
+            logger.debug("Question level reason: %s", question_reason)
 
         if intent == IntentType.BOOKING_REQUEST:
             booking_result = self.booking_service.handle_booking_request(
@@ -179,22 +190,25 @@ class MessageProcessor:
                 if intent in _STANDARD_SALES_INTENTS:
                     routing_category = "consultation_cta"
 
+        elif question_level == "complex":
+            logger.info("Escalation triggered: %s", question_reason)
+            language = self.reply_service.detect_user_language(message.user_message)
+            reply_text = self.reply_service.get_escalation_reply(language)
+            routing_category = "escalate_to_human"
+
         elif intent not in _STANDARD_SALES_INTENTS:
-            should_handoff, escalation_reason = self.reply_service.evaluate_escalation(
-                message.user_message, history
-            )
-            if should_handoff:
-                logger.info("Escalation triggered: %s", escalation_reason)
-                language = self.reply_service.detect_user_language(message.user_message)
-                reply_text = self.reply_service.get_escalation_reply(language)
-                routing_category = "escalate_to_human"
+            reply_text = self.reply_service.generate_reply(message, intent=intent)
+            if question_level == "mid":
+                routing_category = "consultation_cta"
             else:
-                reply_text = self.reply_service.generate_reply(message, intent=intent)
                 routing_category = "answered_basic"
 
         else:
             reply_text = self.reply_service.generate_reply(message, intent=intent)
-            routing_category = "consultation_cta"
+            if question_level == "basic":
+                routing_category = "answered_basic"
+            else:
+                routing_category = "consultation_cta"
 
         logger.info("Reply before guard: %s", reply_text)
         reply_text = self.reply_service.enforce_response_policy(
