@@ -265,6 +265,41 @@ class BookingService:
             return "You already have a confirmed call. If you want, I can help you move it to a different time."
         return "У вас уже є підтверджений дзвінок. Якщо хочете, можу допомогти перенести його на інший час."
 
+    def get_reschedule_prompt_reply(self, language: str) -> str:
+        if language == "en":
+            return "Yes, of course. Please tell me what day and time would work better for rescheduling the call."
+        return "Так, звісно. Підкажіть, будь ласка, на який день і час вам буде зручно перенести дзвінок?"
+
+    def handle_reschedule_request(self, sender_id: str, message_text: str) -> Dict[str, Any]:
+        language = self._detect_language(message_text)
+        requested_dt = self._parse_requested_datetime(message_text)
+
+        if requested_dt is None:
+            return {
+                "status": "reschedule_prompt",
+                "reply_text": self.get_reschedule_prompt_reply(language),
+                "booking_state": BookingState.NONE.value,
+            }
+
+        self.completed_bookings[sender_id] = {
+            **self.completed_bookings.get(sender_id, {}),
+            "start_dt": self._serialize_pending_start_dt(requested_dt),
+        }
+
+        if language == "en":
+            formatted = requested_dt.strftime("%d.%m at %H:%M")
+            reply_text = f"Okay, we can move it. New time: {formatted}. We will contact you at the scheduled time."
+        else:
+            formatted = requested_dt.strftime("%d.%m о %H:%M")
+            reply_text = f"Добре, можемо перенести. Новий час: {formatted}. Ми зв’яжемося з вами у зазначений час."
+
+        return {
+            "status": "rescheduled",
+            "reply_text": reply_text,
+            "booking_state": BookingState.NONE.value,
+            "start_dt": requested_dt.isoformat(),
+        }
+
     def _build_manual_followup_result(
         self,
         *,

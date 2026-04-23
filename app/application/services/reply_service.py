@@ -45,7 +45,7 @@ class ReplyService:
             "можем",
             "давайте",
         ]
-        return any(marker in lowered for marker in russian_markers)
+        return any(re.search(rf"\b{re.escape(marker)}\b", lowered) for marker in russian_markers)
 
     def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
         if language == "en":
@@ -619,11 +619,27 @@ class ReplyService:
                 "клиник",
                 "clinic",
             ],
+            "auto_service": [
+                "автосерв",
+                "сто",
+                "car service",
+                "auto service",
+                "repair shop",
+            ],
+            "beauty_salon": [
+                "салон краси",
+                "б'юті",
+                "бюті",
+                "beauty salon",
+                "beauty studio",
+            ],
         }
 
         matched_dentistry = self._contains_any(normalized, niche_markers["dentistry"])
         matched_clinic = self._contains_any(normalized, niche_markers["clinic"])
-        if not matched_dentistry and not matched_clinic:
+        matched_auto_service = self._contains_any(normalized, niche_markers["auto_service"])
+        matched_beauty_salon = self._contains_any(normalized, niche_markers["beauty_salon"])
+        if not matched_dentistry and not matched_clinic and not matched_auto_service and not matched_beauty_salon:
             return None
 
         if language == "en":
@@ -632,9 +648,26 @@ class ReplyService:
                     "Yes, it is a good fit for dental practices. The bot can help with booking, "
                     "answer common patient questions, and send visit reminders."
                 )
+            if matched_clinic:
+                return (
+                    "Yes, it is a good fit for clinics. The bot can help with booking, answer common "
+                    "questions, and remind clients about upcoming visits."
+                )
+            if matched_auto_service:
+                return (
+                    "Yes, it can be a good fit for a car service. The bot can answer common questions, "
+                    "help with booking, and pass requests to your specialist."
+                )
             return (
-                "Yes, it is a good fit for clinics. The bot can help with booking, answer common "
-                "questions, and remind clients about upcoming visits."
+                "Yes, it can work well for a beauty salon. The bot can help with booking, answer "
+                "common questions, and remind clients about upcoming visits."
+            )
+
+        if matched_auto_service:
+            return (
+                "Так, для автосервісу це може добре підійти — бот може відповідати на типові "
+                "питання, допомагати з записом і передавати заявки спеціалісту. Можу коротко "
+                "підказати, як це виглядало б саме для вашого сервісу."
             )
 
         if matched_dentistry:
@@ -642,10 +675,24 @@ class ReplyService:
                 "Так, добре підходить для стоматологій — бот може допомагати з записом, "
                 "відповідати на типові питання і нагадувати про візити."
             )
-        return (
+        if matched_auto_service:
+            return (
+                "Так, для автосервісу це може добре підійти — бот може відповідати на типові "
+                "питання, допомагати з записом і передавати заявки спеціалісту. Можу коротко "
+                "підказати, як це виглядало б саме для вашого сервісу."
+            )
+        if matched_beauty_salon:
+            return (
+                "Так, для салону краси це може добре підійти — бот може допомагати з записом, "
+                "відповідати на типові питання і нагадувати про візити. Можу коротко підказати, "
+                "як це працювало б саме у вашому випадку."
+            )
+        if matched_clinic:
+            return (
             "Так, добре підходить для клінік — бот може допомагати з записом, відповідати на "
             "типові питання і нагадувати про візити."
-        )
+            )
+        return None
 
     def _generate_service_ai_reply(
         self,

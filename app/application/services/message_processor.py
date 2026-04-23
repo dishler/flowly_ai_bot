@@ -255,6 +255,36 @@ class MessageProcessor:
         if (
             booking_state == BookingState.NONE
             and self.booking_service.has_confirmed_booking(message.sender_id)
+            and self._looks_like_reschedule_request(message.user_message)
+        ):
+            booking_result = self.booking_service.handle_reschedule_request(
+                sender_id=message.sender_id,
+                message_text=message.user_message,
+            )
+            logger.info("Booking result used")
+            reply_text = self.reply_service.enforce_response_policy(
+                reply_text=booking_result["reply_text"],
+                user_text=message.user_message,
+                intent=IntentType.BOOKING_REQUEST,
+            )
+            self.memory_service.add_assistant_message(message.sender_id, reply_text)
+            outbound_result = self.outbound_service.send_reply(
+                platform=message.platform,
+                recipient_id=message.sender_id,
+                text=reply_text,
+            )
+            return {
+                "intent": "booking_reschedule",
+                "routing_category": "consultation_cta",
+                "reply_text": reply_text,
+                "history": self.memory_service.get_history(message.sender_id),
+                "booking_result": booking_result,
+                "outbound_result": outbound_result,
+            }
+
+        if (
+            booking_state == BookingState.NONE
+            and self.booking_service.has_confirmed_booking(message.sender_id)
             and self._looks_like_datetime_only_message(message.user_message)
             and not self._looks_like_reschedule_request(message.user_message)
         ):
