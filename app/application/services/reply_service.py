@@ -53,6 +53,8 @@ class ReplyService:
                 return "Pricing starts from $300, depending on the scope. Want me to estimate the budget for your case or have a specialist follow up?"
             if intent == IntentType.CHANNELS:
                 return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. I can suggest the best channel mix for you, or a specialist can give you a quick consult."
+            if intent == IntentType.SERVICE_DESCRIPTION:
+                return self._get_service_description_fallback_reply(language)
             if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
                 return "We can quickly review your request and suggest the best implementation format. Would it be convenient if our specialist contacts you?"
             return "We can set up automated replies, lead qualification, booking, and reminders in messengers. If you want, our specialist can briefly explain how this would look for your case."
@@ -61,6 +63,8 @@ class ReplyService:
             return "Вартість стартує від 300$, але залежить від задач. Хочете, зорієнтую по бюджету під ваш кейс або передам ваш запит спеціалісту?"
         if intent == IntentType.CHANNELS:
             return "Працюємо не лише з Instagram, а й з Facebook, WhatsApp і Telegram. Можу підказати, що краще підійде саме вам, або наш спеціаліст може коротко проконсультувати."
+        if intent == IntentType.SERVICE_DESCRIPTION:
+            return self._get_service_description_fallback_reply(language)
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
             return "Можемо коротко обговорити ваш запит і підказати найкращий формат реалізації. Зручно, щоб із вами зв’язався наш спеціаліст?"
         return "Можемо налаштувати автоматичні відповіді, кваліфікацію звернень, запис і нагадування в месенджерах. Якщо хочете, наш спеціаліст може коротко підказати, як це виглядатиме саме для вашого кейсу."
@@ -457,6 +461,34 @@ class ReplyService:
 
         parts.append("If you want, we can take a quick look at your case during a free consultation.")
 
+        return " ".join(parts)
+
+    def _get_service_description_fallback_reply(self, language: str) -> str:
+        service = self.knowledge_service.get_service_by_id("ai_dm_bot") or {}
+        short_description = service.get("short_description", "")
+        includes = service.get("includes", [])
+
+        if language == "uk":
+            parts: List[str] = []
+            if short_description:
+                parts.append(short_description)
+            else:
+                parts.append(
+                    "Ми налаштовуємо AI-бота, який відповідає на типові звернення, допомагає кваліфікувати заявки та веде клієнта до запису."
+                )
+            if includes:
+                parts.append("У сервіс зазвичай входить " + ", ".join(includes[:4]) + ".")
+            return " ".join(parts)
+
+        parts = []
+        if short_description:
+            parts.append(short_description)
+        else:
+            parts.append(
+                "We set up an AI bot that handles common inbound questions, helps qualify leads, and guides clients toward booking."
+            )
+        if includes:
+            parts.append("The service usually includes " + ", ".join(includes[:4]) + ".")
         return " ".join(parts)
 
     def _generate_service_ai_reply(

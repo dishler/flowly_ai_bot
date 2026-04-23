@@ -8,3 +8,10 @@ class IntentType(str, Enum):
     CONSULTATION_INTEREST = "consultation_interest"
     BOOKING_REQUEST = "booking_request"
     GENERAL_QUESTION = "general_question"
+
+
+class BookingState(str, Enum):
+    NONE = "NONE"
+    WAITING_FOR_TIME = "WAITING_FOR_TIME"
+    WAITING_FOR_CONTACT = "WAITING_FOR_CONTACT"
+    CONFIRMATION = "CONFIRMATION"
