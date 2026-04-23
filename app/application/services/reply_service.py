@@ -109,6 +109,11 @@ class ReplyService:
             )
         return self.get_escalation_reply(language)
 
+    def get_safe_fallback_reply(self, language: str) -> str:
+        if language == "en":
+            return "Thank you for your message. Our specialist will contact you shortly."
+        return "Дякую за повідомлення. Наш спеціаліст зв’яжеться з вами найближчим часом."
+
     def detect_user_language(self, text: str) -> str:
         return self._detect_language(text)
 
@@ -213,6 +218,12 @@ class ReplyService:
         return None
 
     def _get_pricing_reply(self, language: str) -> str:
+        if language == "uk":
+            return (
+                "Вартість стартує від 300$, але залежить від задач, каналів і складності "
+                "налаштування. Можу зорієнтувати точніше під ваш кейс або передати запит спеціалісту."
+            )
+
         faq_answer = self._get_faq_answer("Скільки це коштує?", language)
         if faq_answer:
             return faq_answer
@@ -314,6 +325,30 @@ class ReplyService:
         ]
         return self._contains_any(normalized, mid_level_markers)
 
+    def _looks_like_question(self, normalized: str, original_text: str) -> bool:
+        if "?" in original_text:
+            return True
+
+        question_markers = [
+            "що",
+            "як",
+            "чи",
+            "скільки",
+            "коли",
+            "why",
+            "what",
+            "how",
+            "when",
+            "can",
+            "could",
+            "would",
+            "do you",
+            "does it",
+            "is it",
+            "are you",
+        ]
+        return self._contains_any(normalized, question_markers)
+
     def classify_question_level(
         self,
         user_text: str,
@@ -342,6 +377,9 @@ class ReplyService:
 
         if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
             return "mid", "known_product_question"
+
+        if not self._looks_like_question(normalized, user_text):
+            return "unclear", "not_clearly_a_question"
 
         return "mid", "general_non_complex"
 

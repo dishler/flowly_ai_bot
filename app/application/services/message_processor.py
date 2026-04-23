@@ -325,6 +325,11 @@ class MessageProcessor:
             )
             routing_category = "escalate_to_human"
 
+        elif question_level == "unclear":
+            language = self.reply_service.detect_user_language(message.user_message)
+            reply_text = self.reply_service.get_safe_fallback_reply(language)
+            routing_category = "safe_handoff"
+
         elif intent not in _STANDARD_SALES_INTENTS:
             reply_text = self.reply_service.generate_reply(message, intent=intent)
             if question_level == "mid":
@@ -348,7 +353,7 @@ class MessageProcessor:
             user_text=message.user_message,
             intent=intent,
         )
-        if booking_result is None:
+        if booking_result is None and routing_category != "safe_handoff":
             reply_text = self._finalize_general_reply_text(
                 sender_id=message.sender_id,
                 user_text=message.user_message,
