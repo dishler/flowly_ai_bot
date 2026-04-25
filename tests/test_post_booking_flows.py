@@ -363,17 +363,38 @@ async def test_soft_followup_decline_does_not_start_booking(processor_factory):
     assert result["booking_result"] is None
 
 
-async def test_price_overrides_stale_waiting_for_time_booking_state(processor_factory):
+async def test_inactive_waiting_for_time_uses_normal_conversation(processor_factory):
+    processor, booking_service = processor_factory()
+    booking_service._save_pending_confirmation(
+        "user-1",
+        {
+            "state": "WAITING_FOR_TIME",
+            "language": "uk",
+            "duration_minutes": 30,
+            "summary": "Consultation call",
+            "description": "Booked via Flowly Meta Bot",
+        },
+    )
+
+    price_result = await processor.process(_message(text="вітаю, скільки коштує бот?"))
+
+    assert price_result["intent"] == "price"
+    assert "Вартість стартує від 200$" in price_result["reply_text"]
+    assert "Підкажіть, будь ласка, точний день і час." not in price_result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_active_waiting_for_time_stays_in_booking_for_unrelated_question(processor_factory):
     processor, booking_service = processor_factory()
 
     start_result = await processor.process(_message(text="давайте дзвінок"))
     price_result = await processor.process(_message(text="вітаю, скільки коштує бот?"))
 
     assert start_result["booking_result"]["booking_state"] == "WAITING_FOR_TIME"
-    assert price_result["intent"] == "price"
-    assert "Вартість стартує від 200$" in price_result["reply_text"]
-    assert "Підкажіть, будь ласка, точний день і час." not in price_result["reply_text"]
-    assert booking_service.get_booking_state("user-1").value == "NONE"
+    assert price_result["intent"] == "booking_flow"
+    assert price_result["booking_result"]["status"] == "booking_unrelated_question"
+    assert "Для дзвінка підкажіть" in price_result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
 async def test_waiting_for_time_still_accepts_normal_booking_time(processor_factory):
@@ -385,6 +406,8 @@ async def test_waiting_for_time_still_accepts_normal_booking_time(processor_fact
     assert result["intent"] == "booking_flow"
     assert "о 15:00 вільний" in result["reply_text"]
     assert "ваше ім’я та номер телефону або email" in result["reply_text"]
+    assert booking_service._get_pending_confirmation("user-1")["is_active"] is True
+    assert booking_service._get_pending_confirmation("user-1")["step"] == "WAITING_FOR_CONTACT"
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
 
 
@@ -398,6 +421,54 @@ async def test_waiting_for_time_1230_asks_for_name_and_contact(processor_factory
     assert "12:30 вільний" in result["reply_text"]
     assert "ваше ім’я та номер телефону або email" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_service_question_does_not_trigger_stale_waiting_for_contact(processor_factory):
+    processor, booking_service = processor_factory()
+    booking_service._save_pending_confirmation(
+        "user-1",
+        {
+            "state": "WAITING_FOR_CONTACT",
+            "language": "uk",
+            "duration_minutes": 30,
+            "summary": "Consultation call",
+            "description": "Booked via Flowly Meta Bot",
+            "source_channel": "instagram",
+            "context_summary": "old stale context",
+        },
+    )
+
+    result = await processor.process(_message(text="Привіт, що це у вас за сервіс?"))
+
+    assert result["intent"] != "booking_flow"
+    assert "Дякую, ім’я зафіксував" not in result["reply_text"]
+    assert "залиште" not in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_active_waiting_for_contact_faq_stays_in_booking_state(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="давайте дзвінок"))
+    await processor.process(_message(text="завтра о 15"))
+    result = await processor.process(_message(text="Привіт, що це у вас за сервіс?"))
+
+    assert result["intent"] == "booking_flow"
+    assert result["booking_result"]["status"] == "booking_unrelated_question"
+    assert "Дякую, ім’я зафіксував" not in result["reply_text"]
+    assert "Щоб продовжити підтвердження дзвінка" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_active_waiting_for_contact_still_accepts_contact(processor_factory):
+    processor, _ = processor_factory()
+
+    await processor.process(_message(text="давайте дзвінок"))
+    await processor.process(_message(text="завтра о 15"))
+    result = await processor.process(_message(text="Іван 0987121328"))
+
+    assert result["intent"] == "booking_flow"
+    assert result["booking_result"]["status"] in {"confirmed", "manual_followup"}
 
 
 async def test_booking_collects_name_and_writes_calendar_description(processor_factory):

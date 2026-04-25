@@ -43,6 +43,10 @@ class BookingService:
         if not pending:
             return BookingState.NONE
 
+        if pending.get("is_active") is not True:
+            logger.warning("Ignoring inactive booking state for sender_id=%s", sender_id)
+            return BookingState.NONE
+
         raw_state = pending.get("state")
         if raw_state:
             try:
@@ -72,9 +76,6 @@ class BookingService:
             return
         self.pending_confirmations.pop(sender_id, None)
 
-    def clear_booking_state(self, sender_id: str) -> None:
-        self._clear_pending_confirmation(sender_id)
-
     def _save_booking_state(
         self,
         sender_id: str,
@@ -92,6 +93,8 @@ class BookingService:
         context_summary: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {
+            "is_active": True,
+            "step": state.value,
             "state": state.value,
             "language": language,
             "duration_minutes": duration_minutes,
@@ -248,6 +251,30 @@ class BookingService:
             return "Дякую, ім’я зафіксував. А для підтвердження залиште, будь ласка, контактний номер або email."
         return "Thank you, I have the name. Please share a contact phone number or email to confirm."
 
+    def _build_unrelated_during_booking_reply(self, language: str, state: BookingState) -> str:
+        if language == "uk":
+            if state == BookingState.WAITING_FOR_CONTACT:
+                return (
+                    "Коротко: це AI-бот для месенджерів, який відповідає на типові звернення "
+                    "і допомагає доводити клієнтів до запису. Щоб продовжити підтвердження "
+                    f"дзвінка, {self._build_name_and_contact_request(language)}."
+                )
+            return (
+                "Коротко: це AI-бот для месенджерів, який відповідає на типові звернення "
+                "і допомагає доводити клієнтів до запису. Для дзвінка підкажіть, будь ласка, "
+                "зручний день і час."
+            )
+
+        if state == BookingState.WAITING_FOR_CONTACT:
+            return (
+                "Briefly: this is an AI bot for messengers that answers common inquiries and "
+                f"helps guide clients to booking. To continue confirming the call, {self._build_name_and_contact_request(language)}."
+            )
+        return (
+            "Briefly: this is an AI bot for messengers that answers common inquiries and helps "
+            "guide clients to booking. For the call, please share a convenient day and time."
+        )
+
     def _build_email_confirmed_reply(self, language: str) -> str:
         if language == "uk":
             return "Дякую, дзвінок підтверджено. Ми зв’яжемося з вами у зазначений час."
@@ -340,6 +367,32 @@ class BookingService:
             return None
 
         return " ".join(name_words)
+
+    def _looks_like_unrelated_question_during_booking(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        if not normalized:
+            return False
+        markers = [
+            "привіт",
+            "вітаю",
+            "доброго дня",
+            "добрий день",
+            "що це",
+            "що це у вас",
+            "що це за сервіс",
+            "за сервіс",
+            "що ви робите",
+            "чим займаєтесь",
+            "скільки коштує",
+            "ціна",
+            "вартість",
+            "канали",
+            "instagram",
+            "facebook",
+            "whatsapp",
+            "telegram",
+        ]
+        return "?" in text or any(marker in normalized for marker in markers)
 
     def _save_captured_contact(
         self,
@@ -911,6 +964,14 @@ class BookingService:
                 if availability_result is not None:
                     return availability_result
 
+            if self._looks_like_unrelated_question_during_booking(message_text):
+                return {
+                    "status": "booking_unrelated_question",
+                    "reply_text": self._build_unrelated_during_booking_reply(language, state),
+                    "event_created": False,
+                    "booking_state": BookingState.WAITING_FOR_TIME.value,
+                }
+
             return self.start_booking_flow(
                 sender_id=sender_id,
                 message_text=message_text,
@@ -918,6 +979,15 @@ class BookingService:
             )
 
         if state == BookingState.WAITING_FOR_CONTACT:
+            if self._looks_like_unrelated_question_during_booking(message_text):
+                return {
+                    "status": "booking_unrelated_question",
+                    "reply_text": self._build_unrelated_during_booking_reply(language, state),
+                    "event_created": False,
+                    "requires_contact": True,
+                    "booking_state": BookingState.WAITING_FOR_CONTACT.value,
+                }
+
             contact_details = self._extract_contact_details(message_text)
             customer_name = contact_details["customer_name"] or pending.get("customer_name")
             contact_email = contact_details["email"] or pending.get("contact_email")

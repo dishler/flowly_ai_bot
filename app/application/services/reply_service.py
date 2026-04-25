@@ -208,6 +208,8 @@ class ReplyService:
         return any(marker in text for marker in markers)
 
     def _get_faq_answer(self, question_uk: str, language: str) -> Optional[str]:
+        if self.knowledge_service is None:
+            return None
         faq_items = self.knowledge_service.get_all_faq() or []
         for item in faq_items:
             if item.get("question") == question_uk:
@@ -416,7 +418,8 @@ class ReplyService:
 
     def _build_service_grounding_context(self, language: str) -> Dict[str, Any]:
         company = self.knowledge_service.get_company() or {}
-        service = self.knowledge_service.get_service_by_id("ai_dm_bot") or {}
+        service = self.knowledge_service.get_service_by_id("ai_dm_bot") if self.knowledge_service else {}
+        service = service or {}
         pricing = self.knowledge_service.get_pricing() or {}
         consultation = self.knowledge_service.get_consultation() or {}
         constraints = self.knowledge_service.get_constraints() or {}
@@ -502,7 +505,8 @@ class ReplyService:
         )
 
     def _get_service_fallback_reply(self, language: str) -> str:
-        service = self.knowledge_service.get_service_by_id("ai_dm_bot") or {}
+        service = self.knowledge_service.get_service_by_id("ai_dm_bot") if self.knowledge_service else {}
+        service = service or {}
         short_description = service.get("short_description", "")
         includes = service.get("includes", [])
         typical_result = service.get("typical_result", [])
@@ -578,7 +582,8 @@ class ReplyService:
             if faq_answer:
                 return faq_answer
 
-        service = self.knowledge_service.get_service_by_id("ai_dm_bot") or {}
+        service = self.knowledge_service.get_service_by_id("ai_dm_bot") if self.knowledge_service else {}
+        service = service or {}
         short_description = service.get("short_description", "")
         includes = service.get("includes", [])
 
