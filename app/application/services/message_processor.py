@@ -257,7 +257,7 @@ class MessageProcessor:
             "можливо пізніше": soft_followup_reply,
             "не зараз": soft_followup_reply,
             "я подумаю": soft_followup_reply,
-            "це не питання це пропозиція": "Дякую за повідомлення. Наш спеціаліст зв’яжеться з вами найближчим часом.",
+            "це не питання це пропозиція": "Дякую, зафіксував. Передам це команді, щоб подивилися уважно.",
         }
         return replies.get(normalized)
 
@@ -311,11 +311,13 @@ class MessageProcessor:
                 "автоматизувати — бот може приймати звернення, уточнювати деталі "
                 "і записувати клієнтів у календар.\n\n"
                 "Щоб підібрати оптимальне рішення під ваш процес, краще коротко "
-                "обговорити це на дзвінку. Підкажіть, будь ласка, коли вам буде зручно?"
+                "обговорити це на дзвінку, якщо вам ок. Коли вам було б зручно?"
             )
         return (
-            "Got it, thank you for the details. In your case, it is better to discuss it briefly "
-            "on a call so we can suggest the best setup. Please tell me when it would be convenient."
+            "Зрозумів, дякую за деталі. У вашому випадку це якраз можна автоматизувати — бот може "
+            "приймати звернення, уточнювати деталі і записувати клієнтів у календар.\n\n"
+            "Щоб підібрати оптимальне рішення під ваш процес, краще коротко обговорити це на дзвінку, "
+            "якщо вам ок. Коли вам було б зручно?"
         )
 
     def _handle_confirmed_booking_message(self, message: NormalizedMessage) -> Dict[str, Any] | None:
@@ -401,10 +403,7 @@ class MessageProcessor:
             return reply_text
 
         language = self.reply_service.detect_user_language(user_text)
-        if language == "en":
-            prefix = "Hi! "
-        else:
-            prefix = "Привіт! "
+        prefix = "Привіт! "
 
         if self._has_greeting_prefix(reply_text, language):
             return reply_text

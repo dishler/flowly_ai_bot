@@ -50,29 +50,29 @@ class ReplyService:
     def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
         if language == "en":
             if intent == IntentType.PRICE:
-                return "Pricing starts from $200, depending on the scope. We can briefly discuss your case on a call, or I can pass the request to a specialist."
+                return "Стартуємо від 200$, а точна сума залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
             if intent == IntentType.CHANNELS:
-                return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. If you want, I can suggest which channel would fit your case best."
+                return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
             if intent == IntentType.SERVICE_DESCRIPTION:
                 return self._get_service_description_fallback_reply(language)
             if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
-                return "We can quickly review your request and suggest the best implementation format. Would it be convenient if our specialist contacts you?"
-            return "We can set up automated replies, lead qualification, booking, and reminders in messengers. If you want, our specialist can briefly explain how this would look for your case."
+                return "Так, можемо коротко обговорити. На дзвінку швидко розберемо процес і підкажемо, що варто автоматизувати першим."
+            return "Ми налаштовуємо бота, який відповідає в месенджерах, уточнює деталі й веде клієнта до запису. Можемо коротко під ваш кейс підказати, якщо вам ок."
 
         if intent == IntentType.PRICE:
-            return "Вартість стартує від 200$, але залежить від задач. Можемо коротко обговорити ваш кейс на дзвінку або я передам запит спеціалісту."
+            return "Вартість стартує від 200$, але залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
         if intent == IntentType.CHANNELS:
-            return "Працюємо не лише з Instagram, а й з Facebook, WhatsApp і Telegram. Можу підказати, що краще підійде саме вам, або наш спеціаліст може коротко проконсультувати."
+            return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
         if intent == IntentType.SERVICE_DESCRIPTION:
             return self._get_service_description_fallback_reply(language)
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
-            return "Можемо коротко обговорити ваш запит і підказати найкращий формат реалізації. Зручно, щоб із вами зв’язався наш спеціаліст?"
-        return "Можемо налаштувати автоматичні відповіді, кваліфікацію звернень, запис і нагадування в месенджерах. Якщо хочете, наш спеціаліст може коротко підказати, як це виглядатиме саме для вашого кейсу."
+            return "Так, можемо коротко обговорити. На дзвінку швидко розберемо процес і підкажемо, що варто автоматизувати першим."
+        return "Ми налаштовуємо бота, який відповідає в месенджерах, уточнює деталі й веде клієнта до запису. Можемо коротко під ваш кейс підказати, якщо вам ок."
 
     def get_escalation_reply(self, language: str) -> str:
         if language == "en":
-            return "This is a more case-specific question. To give you an accurate answer, one of our specialists can follow up with you shortly."
-        return "Це вже більш індивідуальне питання. Щоб дати точну відповідь, можу запропонувати вам короткий дзвінок з нашим спеціалістом. Що скажете?"
+            return "Так, це можна налаштувати, але краще спершу зрозуміти ваш процес. Можемо коротко обговорити на дзвінку, якщо вам ок."
+        return "Так, це можна налаштувати, але краще спершу зрозуміти ваш процес. Можемо коротко обговорити на дзвінку, якщо вам ок."
 
     def _is_complex_query(self, normalized: str) -> bool:
         complex_markers = [
@@ -100,19 +100,18 @@ class ReplyService:
         if self._is_complex_query(normalized):
             if language == "en":
                 return (
-                    "Cases like this usually depend on your workflow logic, CRM, integrations, "
-                    "and the number of branches. To give you an accurate answer, I can suggest a short call with our specialist. What do you think?"
+                    "Так, такі сценарії зазвичай вирішуються через логіку бота, CRM та правила передачі заявок. Можемо коротко пройтись по вашому процесу на дзвінку, якщо вам ок."
                 )
             return (
-                "Такі кейси вже залежать від вашої логіки роботи, CRM і кількості філій. "
-                "Щоб дати точну відповідь, можу запропонувати вам короткий дзвінок з нашим спеціалістом. Що скажете?"
+                "Так, такі сценарії зазвичай вирішуються через логіку бота, CRM та правила передачі заявок. "
+                "Можемо коротко пройтись по вашому процесу на дзвінку, якщо вам ок."
             )
         return self.get_escalation_reply(language)
 
     def get_safe_fallback_reply(self, language: str) -> str:
         if language == "en":
-            return "Thank you for your message. Our specialist will contact you shortly."
-        return "Дякую за повідомлення. Наш спеціаліст зв’яжеться з вами найближчим часом."
+            return "Зрозумів. Якщо коротко: ми допомагаємо автоматизувати відповіді й запис у месенджерах, щоб не втрачати заявки."
+        return "Зрозумів. Якщо коротко: ми допомагаємо автоматизувати відповіді й запис у месенджерах, щоб не втрачати заявки."
 
     def detect_user_language(self, text: str) -> str:
         return self._detect_language(text)
@@ -213,8 +212,7 @@ class ReplyService:
         faq_items = self.knowledge_service.get_all_faq() or []
         for item in faq_items:
             if item.get("question") == question_uk:
-                key = "answer_en" if language == "en" else "answer_uk"
-                answer = item.get(key)
+                answer = item.get("answer_uk")
                 if answer:
                     return str(answer)
         return None
@@ -223,7 +221,7 @@ class ReplyService:
         if language == "uk":
             return (
                 "Вартість стартує від 200$, але залежить від задач, каналів і складності "
-                "налаштування. Можемо коротко обговорити ваш кейс на дзвінку або я передам запит спеціалісту."
+                "налаштування. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
             )
 
         faq_answer = self._get_faq_answer("Скільки це коштує?", language)
@@ -671,31 +669,30 @@ class ReplyService:
         if matched_auto_service:
             return (
                 "Так, для автосервісу це може добре підійти — бот може відповідати на типові "
-                "питання, допомагати з записом і передавати заявки спеціалісту. Можу коротко "
-                "підказати, як це виглядало б саме для вашого сервісу."
+                "питання, уточнювати деталі по авто і вести клієнта до запису. Можемо коротко "
+                "прикинути сценарій під ваш сервіс, якщо вам ок."
             )
 
         if matched_dentistry:
             return (
-                "Так, добре підходить для стоматологій — бот може допомагати з записом, "
-                "відповідати на типові питання і нагадувати про візити."
+                "Так, для стоматологій це добре працює: бот відповідає на типові питання, "
+                "допомагає з записом і нагадує про візити."
             )
         if matched_auto_service:
             return (
                 "Так, для автосервісу це може добре підійти — бот може відповідати на типові "
-                "питання, допомагати з записом і передавати заявки спеціалісту. Можу коротко "
-                "підказати, як це виглядало б саме для вашого сервісу."
+                "питання, уточнювати деталі по авто і вести клієнта до запису. Можемо коротко "
+                "прикинути сценарій під ваш сервіс, якщо вам ок."
             )
         if matched_beauty_salon:
             return (
-                "Так, для салону краси це може добре підійти — бот може допомагати з записом, "
-                "відповідати на типові питання і нагадувати про візити. Можу коротко підказати, "
-                "як це працювало б саме у вашому випадку."
+                "Так, для салону краси це добре підходить: бот відповідає на типові питання, "
+                "допомагає з записом і нагадує про візити. Можемо коротко прикинути сценарій під ваш салон."
             )
         if matched_clinic:
             return (
-            "Так, добре підходить для клінік — бот може допомагати з записом, відповідати на "
-            "типові питання і нагадувати про візити."
+            "Так, для клінік це добре працює: бот допомагає з записом, відповідає на типові "
+            "питання і нагадує про візити."
             )
         return None
 

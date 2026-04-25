@@ -242,7 +242,7 @@ async def test_cancel_confirmed_booking_hands_off_when_calendar_delete_fails(pro
 
     assert result["intent"] == "booking_cancel"
     assert result["booking_result"]["status"] == "cancel_handoff"
-    assert result["reply_text"] == "Добре, я передам спеціалісту, щоб дзвінок скасували."
+    assert result["reply_text"] == "Добре, передам команді, щоб дзвінок скасували без зайвих дій з вашого боку."
     assert booking_service.has_confirmed_booking("user-1")
 
 
@@ -316,7 +316,7 @@ async def test_empty_voice_transcription_uses_audio_retry_reply(processor_factor
             "Якщо буде актуально — можемо швидко глянути ваш кейс і зрозуміти, "
             "чи є сенс впроваджувати.",
         ),
-        ("це не питання це пропозиція", "Дякую за повідомлення. Наш спеціаліст зв’яжеться з вами найближчим часом."),
+        ("це не питання це пропозиція", "Дякую, зафіксував. Передам це команді, щоб подивилися уважно."),
     ],
 )
 async def test_short_contextual_replies_do_not_use_complex_fallback(processor_factory, text, reply):
