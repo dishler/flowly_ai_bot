@@ -129,7 +129,15 @@ class BookingService:
             "no", "nope", "not now", "cancel",
             "ні", "не", "скасувати", "не треба",
         }
-        return normalized in rejections
+        rejection_markers = [
+            "скасуйте",
+            "скасувати",
+            "відмінити",
+            "відмініть",
+            "cancel",
+            "not now",
+        ]
+        return normalized in rejections or any(marker in normalized for marker in rejection_markers)
 
     def _build_unclear_time_reply(self, language: str) -> str:
         if language == "uk":
@@ -164,6 +172,21 @@ class BookingService:
         if language == "uk":
             return "Добре, не бронюю. Якщо хочете, можете надіслати інший час."
         return "Okay, I will not book it. You can send another time if you want."
+
+    def _build_confirmed_cancelled_reply(self, language: str) -> str:
+        if language == "uk":
+            return "Добре, я скасував ваш дзвінок. Якщо буде актуально — можемо запланувати інший час."
+        return "Okay, I cancelled your call. If it becomes relevant again, we can schedule another time."
+
+    def _build_call_explanation_reply(self, language: str) -> str:
+        if language == "uk":
+            return "На дзвінку ми коротко розберемо ваш кейс, задачі і підкажемо, як бот може працювати саме у вас."
+        return "On the call, we will briefly review your case and goals, then explain how the bot can work for your business."
+
+    def _build_availability_question_reply(self, language: str) -> str:
+        if language == "uk":
+            return "Підкажіть, будь ласка, на який день вам зручно, і я запропоную доступні слоти."
+        return "Please tell me which day works for you, and I will suggest available slots."
 
     def _build_confirm_prompt_reply(self, language: str) -> str:
         if language == "uk":
@@ -245,6 +268,22 @@ class BookingService:
 
     def has_confirmed_booking(self, sender_id: str) -> bool:
         return sender_id in self.completed_bookings
+
+    def get_call_explanation_reply(self, language: str) -> str:
+        return self._build_call_explanation_reply(language)
+
+    def get_availability_question_reply(self, language: str) -> str:
+        return self._build_availability_question_reply(language)
+
+    def cancel_confirmed_booking(self, sender_id: str, message_text: str) -> Dict[str, Any]:
+        language = self._detect_language(message_text)
+        self.completed_bookings.pop(sender_id, None)
+        self._clear_pending_confirmation(sender_id)
+        return {
+            "status": "cancelled",
+            "reply_text": self._build_confirmed_cancelled_reply(language),
+            "booking_state": BookingState.NONE.value,
+        }
 
     def _mark_booking_completed(
         self,
@@ -385,6 +424,38 @@ class BookingService:
                 return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         hour_match = re.search(r"\b(\d{1,2})\b", normalized)
+        weekday_map = {
+            "monday": 0,
+            "понеділок": 0,
+            "понеділка": 0,
+            "вівторок": 1,
+            "вівторка": 1,
+            "tuesday": 1,
+            "середа": 2,
+            "середу": 2,
+            "wednesday": 2,
+            "четвер": 3,
+            "четверг": 3,
+            "thursday": 3,
+            "п'ятниц": 4,
+            "п’ятниц": 4,
+            "friday": 4,
+        }
+        matched_weekday = None
+        for marker, weekday in weekday_map.items():
+            if marker in normalized:
+                matched_weekday = weekday
+                break
+
+        if hour_match and matched_weekday is not None:
+            hour = int(hour_match.group(1))
+            if 0 <= hour <= 23:
+                days_ahead = (matched_weekday - now.weekday()) % 7
+                if days_ahead == 0:
+                    days_ahead = 7
+                base = now + timedelta(days=days_ahead)
+                return base.replace(hour=hour, minute=0, second=0, microsecond=0)
+
         if hour_match and (
             "завтра" in normalized
             or "tomorrow" in normalized

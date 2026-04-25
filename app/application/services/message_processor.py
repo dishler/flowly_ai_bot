@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import Any, Dict
 import re
@@ -123,6 +125,133 @@ class MessageProcessor:
             "записати знову",
         ]
         return any(marker in normalized for marker in markers)
+
+    def _looks_like_cancel_request(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        markers = [
+            "скасуйте",
+            "скасувати",
+            "відмінити",
+            "відмініть",
+            "не зможу",
+            "cancel",
+            "cancel the call",
+            "cancel my call",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _looks_like_availability_question(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        markers = [
+            "вільні слоти",
+            "вільний слот",
+            "доступні слоти",
+            "які слоти",
+            "коли є",
+            "коли можна",
+            "в який час",
+            "available slots",
+            "free slots",
+            "what slots",
+            "when are you available",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _looks_like_call_explanation_question(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        markers = [
+            "що саме буде",
+            "що буде на дзвінку",
+            "що на дзвінку",
+            "про що дзвінок",
+            "про що буде дзвінок",
+            "що буде на консультації",
+            "what will be on the call",
+            "what is the call about",
+            "what happens on the call",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _build_booking_reply_result(
+        self,
+        *,
+        message: NormalizedMessage,
+        reply_text: str,
+        intent_value: str,
+        booking_result: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        reply_text = self.reply_service.enforce_response_policy(
+            reply_text=reply_text,
+            user_text=message.user_message,
+            intent=IntentType.BOOKING_REQUEST,
+        )
+        self.memory_service.add_assistant_message(message.sender_id, reply_text)
+        outbound_result = self.outbound_service.send_reply(
+            platform=message.platform,
+            recipient_id=message.sender_id,
+            text=reply_text,
+        )
+        return {
+            "intent": intent_value,
+            "routing_category": "consultation_cta",
+            "reply_text": reply_text,
+            "history": self.memory_service.get_history(message.sender_id),
+            "booking_result": booking_result,
+            "outbound_result": outbound_result,
+        }
+
+    def _handle_confirmed_booking_message(self, message: NormalizedMessage) -> Dict[str, Any] | None:
+        language = self.reply_service.detect_user_language(message.user_message)
+
+        if self._looks_like_reschedule_request(message.user_message):
+            booking_result = self.booking_service.handle_reschedule_request(
+                sender_id=message.sender_id,
+                message_text=message.user_message,
+            )
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=booking_result["reply_text"],
+                intent_value="booking_reschedule",
+                booking_result=booking_result,
+            )
+
+        if self._looks_like_cancel_request(message.user_message):
+            booking_result = self.booking_service.cancel_confirmed_booking(
+                sender_id=message.sender_id,
+                message_text=message.user_message,
+            )
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=booking_result["reply_text"],
+                intent_value="booking_cancel",
+                booking_result=booking_result,
+            )
+
+        if self._looks_like_availability_question(message.user_message):
+            reply_text = self.booking_service.get_availability_question_reply(language)
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=reply_text,
+                intent_value="booking_availability_question",
+            )
+
+        if self._looks_like_call_explanation_question(message.user_message):
+            reply_text = self.booking_service.get_call_explanation_reply(language)
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=reply_text,
+                intent_value="booking_call_explanation",
+            )
+
+        if self._looks_like_datetime_only_message(message.user_message):
+            reply_text = self.booking_service.get_reschedule_reply(language)
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=reply_text,
+                intent_value="post_booking_reschedule_prompt",
+            )
+
+        return None
 
     async def _resolve_message_text(self, message: NormalizedMessage) -> str:
         user_message = (getattr(message, "user_message", "") or "").strip()
@@ -255,61 +384,28 @@ class MessageProcessor:
         if (
             booking_state == BookingState.NONE
             and self.booking_service.has_confirmed_booking(message.sender_id)
-            and self._looks_like_reschedule_request(message.user_message)
         ):
-            booking_result = self.booking_service.handle_reschedule_request(
-                sender_id=message.sender_id,
-                message_text=message.user_message,
-            )
-            logger.info("Booking result used")
-            reply_text = self.reply_service.enforce_response_policy(
-                reply_text=booking_result["reply_text"],
-                user_text=message.user_message,
-                intent=IntentType.BOOKING_REQUEST,
-            )
-            self.memory_service.add_assistant_message(message.sender_id, reply_text)
-            outbound_result = self.outbound_service.send_reply(
-                platform=message.platform,
-                recipient_id=message.sender_id,
-                text=reply_text,
-            )
-            return {
-                "intent": "booking_reschedule",
-                "routing_category": "consultation_cta",
-                "reply_text": reply_text,
-                "history": self.memory_service.get_history(message.sender_id),
-                "booking_result": booking_result,
-                "outbound_result": outbound_result,
-            }
+            confirmed_result = self._handle_confirmed_booking_message(message)
+            if confirmed_result is not None:
+                return confirmed_result
 
-        if (
-            booking_state == BookingState.NONE
-            and self.booking_service.has_confirmed_booking(message.sender_id)
-            and self._looks_like_datetime_only_message(message.user_message)
-            and not self._looks_like_reschedule_request(message.user_message)
-        ):
-            reply_text = self.booking_service.get_reschedule_reply(
-                self.reply_service.detect_user_language(message.user_message)
-            )
-            reply_text = self.reply_service.enforce_response_policy(
+        if self._looks_like_availability_question(message.user_message):
+            language = self.reply_service.detect_user_language(message.user_message)
+            reply_text = self.booking_service.get_availability_question_reply(language)
+            return self._build_booking_reply_result(
+                message=message,
                 reply_text=reply_text,
-                user_text=message.user_message,
-                intent=IntentType.BOOKING_REQUEST,
+                intent_value="booking_availability_question",
             )
-            self.memory_service.add_assistant_message(message.sender_id, reply_text)
-            outbound_result = self.outbound_service.send_reply(
-                platform=message.platform,
-                recipient_id=message.sender_id,
-                text=reply_text,
+
+        if self._looks_like_call_explanation_question(message.user_message):
+            language = self.reply_service.detect_user_language(message.user_message)
+            reply_text = self.booking_service.get_call_explanation_reply(language)
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=reply_text,
+                intent_value="booking_call_explanation",
             )
-            return {
-                "intent": "post_booking_reschedule_prompt",
-                "routing_category": "consultation_cta",
-                "reply_text": reply_text,
-                "history": self.memory_service.get_history(message.sender_id),
-                "booking_result": None,
-                "outbound_result": outbound_result,
-            }
 
         intent = self.intent_service.detect_intent(message.user_message)
         intent_value = intent.value
