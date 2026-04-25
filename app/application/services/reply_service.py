@@ -569,6 +569,33 @@ class ReplyService:
         ]
         return self._contains_any(normalized, includes_markers)
 
+    def _is_for_whom_query(self, normalized: str) -> bool:
+        for_whom_markers = [
+            "для кого це",
+            "а для кого",
+            "для кого цей",
+            "кому це підходить",
+            "для кого підходить",
+            "for whom",
+            "who is this for",
+        ]
+        return self._contains_any(normalized, for_whom_markers)
+
+    def _is_what_does_bot_do_query(self, normalized: str) -> bool:
+        what_does_markers = [
+            "що конкретно робить",
+            "як це працює",
+            "як ви працюєте",
+            "які функції",
+            "розкажіть про",
+            "розкажіть детальніше",
+            "що саме ви робите",
+            "how does it work",
+            "what does it do",
+            "what are the features",
+        ]
+        return self._contains_any(normalized, what_does_markers)
+
     def _get_service_description_fallback_reply(
         self,
         language: str,
@@ -577,6 +604,14 @@ class ReplyService:
         normalized = self._normalize(user_text or "")
         if normalized and self._is_service_includes_query(normalized):
             faq_answer = self._get_faq_answer("Що входить у сервіс?", language)
+            if faq_answer:
+                return faq_answer
+        if normalized and self._is_for_whom_query(normalized):
+            faq_answer = self._get_faq_answer("Для кого це?", language)
+            if faq_answer:
+                return faq_answer
+        if normalized and self._is_what_does_bot_do_query(normalized):
+            faq_answer = self._get_faq_answer("Як це працює?", language)
             if faq_answer:
                 return faq_answer
 
