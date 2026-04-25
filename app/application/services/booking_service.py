@@ -155,17 +155,22 @@ class BookingService:
             return f"На цей час слот уже зайнятий. Можу запропонувати: {', '.join(slots)}."
         return f"That time is already booked. I can offer: {', '.join(slots)}."
 
+    def _build_name_and_contact_request(self, language: str) -> str:
+        if language == "uk":
+            return "залиште, будь ласка, ваше ім’я та номер телефону або email"
+        return "please share your name and phone number or email"
+
     def _build_available_reply(self, language: str, start_dt: datetime) -> str:
         if language == "uk":
             formatted = start_dt.strftime("%d.%m о %H:%M")
             return (
                 f"Супер, слот {formatted} вільний. "
-                "Щоб підтвердити дзвінок, залиште, будь ласка, ваше ім’я та номер телефону або email."
+                f"Щоб підтвердити дзвінок, {self._build_name_and_contact_request(language)}."
             )
         formatted = start_dt.strftime("%d.%m at %H:%M")
         return (
-            f"Great, the {formatted} slot is available. To confirm the call, please share your "
-            "name and phone number or email."
+            f"Great, the {formatted} slot is available. To confirm the call, "
+            f"{self._build_name_and_contact_request(language)}."
         )
 
     def _build_confirmed_reply(self, language: str) -> str:
@@ -228,9 +233,9 @@ class BookingService:
 
     def _build_contact_retry_reply(self, language: str) -> str:
         if language == "uk":
-            return "Щоб підтвердити дзвінок, залиште, будь ласка, ваше ім’я та номер телефону або email."
+            return f"Щоб підтвердити дзвінок, {self._build_name_and_contact_request(language)}."
         return (
-            "To confirm the call, please share your name and phone number or email."
+            f"To confirm the call, {self._build_name_and_contact_request(language)}."
         )
 
     def _build_name_retry_reply(self, language: str) -> str:
@@ -240,8 +245,8 @@ class BookingService:
 
     def _build_contact_only_retry_reply(self, language: str) -> str:
         if language == "uk":
-            return "Дякую. А залиште, будь ласка, номер телефону або email для підтвердження."
-        return "Thank you. Please share a phone number or email to confirm."
+            return "Дякую, ім’я зафіксував. А для підтвердження залиште, будь ласка, контактний номер або email."
+        return "Thank you, I have the name. Please share a contact phone number or email to confirm."
 
     def _build_email_confirmed_reply(self, language: str) -> str:
         if language == "uk":

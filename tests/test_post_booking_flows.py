@@ -270,7 +270,7 @@ async def test_availability_datetime_followup_asks_for_contact(processor_factory
 
     assert result["intent"] == "booking_flow"
     assert "о 15:00 вільний" in result["reply_text"]
-    assert "номер телефону або email" in result["reply_text"]
+    assert "ваше ім’я та номер телефону або email" in result["reply_text"]
 
 
 async def test_availability_time_only_followup_uses_context(processor_factory):
@@ -281,7 +281,7 @@ async def test_availability_time_only_followup_uses_context(processor_factory):
 
     assert result["intent"] == "booking_flow"
     assert "о 15:00 вільний" in result["reply_text"]
-    assert "номер телефону або email" in result["reply_text"]
+    assert "ваше ім’я та номер телефону або email" in result["reply_text"]
 
 
 async def test_empty_voice_transcription_uses_audio_retry_reply(processor_factory):
@@ -384,7 +384,19 @@ async def test_waiting_for_time_still_accepts_normal_booking_time(processor_fact
 
     assert result["intent"] == "booking_flow"
     assert "о 15:00 вільний" in result["reply_text"]
-    assert "номер телефону або email" in result["reply_text"]
+    assert "ваше ім’я та номер телефону або email" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_waiting_for_time_1230_asks_for_name_and_contact(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="давайте дзвінок"))
+    result = await processor.process(_message(text="завтра 12:30"))
+
+    assert result["intent"] == "booking_flow"
+    assert "12:30 вільний" in result["reply_text"]
+    assert "ваше ім’я та номер телефону або email" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
 
 
@@ -429,5 +441,8 @@ async def test_booking_name_only_asks_for_contact(processor_factory):
     result = await processor.process(_message(text="Іван"))
 
     assert result["booking_result"]["status"] == "waiting_for_contact"
-    assert result["reply_text"] == "Дякую. А залиште, будь ласка, номер телефону або email для підтвердження."
+    assert result["reply_text"] == (
+        "Дякую, ім’я зафіксував. А для підтвердження залиште, будь ласка, "
+        "контактний номер або email."
+    )
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
