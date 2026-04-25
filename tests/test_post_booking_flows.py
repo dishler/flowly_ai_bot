@@ -384,6 +384,16 @@ async def test_inactive_waiting_for_time_uses_normal_conversation(processor_fact
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
+async def test_price_question_skolko_ce_koshtue(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="Скільки це коштує?"))
+
+    assert result["intent"] == "price"
+    assert "Вартість стартує від 200$" in result["reply_text"]
+    assert "Можемо коротко обговорити ваш кейс на дзвінку" in result["reply_text"]
+
+
 async def test_active_waiting_for_time_stays_in_booking_for_unrelated_question(processor_factory):
     processor, booking_service = processor_factory()
 
