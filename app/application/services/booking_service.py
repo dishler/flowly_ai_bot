@@ -923,6 +923,76 @@ class BookingService:
                 "start_dt": requested_dt.isoformat(),
             }
 
+        contact_details = self._extract_contact_details(message_text)
+
+        if contact_details["has_name"] and (contact_details["has_phone"] or contact_details["has_email"]):
+            # Proceed directly to confirmation and create event
+            try:
+                description_parts = ["Booked via Flowly Meta Bot"]
+                if contact_details["customer_name"]:
+                    description_parts.append(f"Customer name: {contact_details['customer_name']}")
+                description_parts.append(f"Sender ID: {sender_id}")
+                if source_channel:
+                    description_parts.append(f"Source: {source_channel}")
+                description_parts.append(f"Context: {message_text[:280]}")
+                contact_parts = []
+                if contact_details["email"]:
+                    contact_parts.append(f"Email: {contact_details['email']}")
+                if contact_details["phone"]:
+                    contact_parts.append(f"Phone: {contact_details['phone']}")
+                if contact_parts:
+                    description_parts.append("Contact: " + " | ".join(contact_parts))
+                description = "\n".join(description_parts)
+
+                if self.calendar_service.google_calendar_client and self.calendar_service.google_calendar_client.is_configured():
+                    created = self.calendar_service.create_booking_event(
+                        start_dt=requested_dt,
+                        duration_minutes=30,
+                        summary="Consultation call",
+                        description=description,
+                        attendee_emails=[],
+                    )
+                    self._save_captured_contact(
+                        sender_id,
+                        customer_name=contact_details["customer_name"],
+                        email=contact_details["email"],
+                        phone=contact_details["phone"],
+                        start_dt=requested_dt,
+                    )
+                    self._mark_booking_completed(
+                        sender_id,
+                        start_dt=requested_dt,
+                        customer_name=contact_details["customer_name"],
+                        email=contact_details["email"],
+                        phone=contact_details["phone"],
+                        calendar_event_id=created.event_id,
+                    )
+                    logger.info("Calendar event created for immediate booking")
+                else:
+                    self._save_captured_contact(
+                        sender_id,
+                        customer_name=contact_details["customer_name"],
+                        email=contact_details["email"],
+                        phone=contact_details["phone"],
+                        start_dt=requested_dt,
+                    )
+                    logger.info("Manual follow-up needed for immediate booking")
+
+                return {
+                    "status": "confirmed",
+                    "reply_text": self._build_both_contacts_confirmed_reply(language, requested_dt),
+                    "event_created": True,
+                    "booking_state": BookingState.NONE.value,
+                }
+            except Exception:
+                logger.exception("Immediate booking creation failed")
+                return {
+                    "status": "create_failed",
+                    "reply_text": self._build_create_failed_reply(language),
+                    "event_created": False,
+                    "booking_state": BookingState.NONE.value,
+                }
+
         self._save_booking_state(
             sender_id,
             state=BookingState.WAITING_FOR_CONTACT,
@@ -930,6 +1000,9 @@ class BookingService:
             start_dt=requested_dt,
             source_channel=source_channel,
             context_summary=message_text[:280],
+            customer_name=contact_details["customer_name"],
+            contact_email=contact_details["email"],
+            contact_phone=contact_details["phone"],
         )
 
         return {

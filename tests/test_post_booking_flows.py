@@ -527,3 +527,15 @@ async def test_booking_name_only_asks_for_contact(processor_factory):
         "контактний номер або email."
     )
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_booking_with_contact_in_initial_message(processor_factory):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text="Давайте дзвінок завтра Іван 0991234567"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "confirmed"
+    assert "подтвердили" in result["booking_result"]["reply_text"] or "підтвердили" in result["booking_result"]["reply_text"]
+    assert result["booking_result"]["event_created"] is True
+    assert booking_service.get_booking_state("user-1").value == "NONE"
