@@ -87,6 +87,7 @@ class BookingService:
         description: str | None = None,
         contact_email: str | None = None,
         contact_phone: str | None = None,
+        customer_name: str | None = None,
         source_channel: str | None = None,
         context_summary: str | None = None,
     ) -> None:
@@ -95,9 +96,10 @@ class BookingService:
             "language": language,
             "duration_minutes": duration_minutes,
             "summary": summary,
-            "description": description or f"Booked via Flowly Meta Bot. Sender ID: {sender_id}",
+            "description": description or "Booked via Flowly Meta Bot",
             "contact_email": contact_email,
             "contact_phone": contact_phone,
+            "customer_name": customer_name,
             "source_channel": source_channel,
             "context_summary": context_summary,
         }
@@ -158,12 +160,12 @@ class BookingService:
             formatted = start_dt.strftime("%d.%m о %H:%M")
             return (
                 f"Супер, слот {formatted} вільний. "
-                "Щоб підтвердити дзвінок, залиште, будь ласка, номер телефону або email."
+                "Щоб підтвердити дзвінок, залиште, будь ласка, ваше ім’я та номер телефону або email."
             )
         formatted = start_dt.strftime("%d.%m at %H:%M")
         return (
             f"Great, the {formatted} slot is available. To confirm the call, please share your "
-            "phone number or email."
+            "name and phone number or email."
         )
 
     def _build_confirmed_reply(self, language: str) -> str:
@@ -226,10 +228,20 @@ class BookingService:
 
     def _build_contact_retry_reply(self, language: str) -> str:
         if language == "uk":
-            return "Щоб підтвердити дзвінок, залиште, будь ласка, номер телефону або email."
+            return "Щоб підтвердити дзвінок, залиште, будь ласка, ваше ім’я та номер телефону або email."
         return (
-            "To confirm the call, please share your phone number or email."
+            "To confirm the call, please share your name and phone number or email."
         )
+
+    def _build_name_retry_reply(self, language: str) -> str:
+        if language == "uk":
+            return "Дякую. А підкажіть, будь ласка, ваше ім’я?"
+        return "Thank you. Could you please share your name?"
+
+    def _build_contact_only_retry_reply(self, language: str) -> str:
+        if language == "uk":
+            return "Дякую. А залиште, будь ласка, номер телефону або email для підтвердження."
+        return "Thank you. Please share a phone number or email to confirm."
 
     def _build_email_confirmed_reply(self, language: str) -> str:
         if language == "uk":
@@ -273,15 +285,56 @@ class BookingService:
 
         primary_email = emails[0] if emails else None
         primary_phone = phones[0] if phones else None
+        customer_name = self._extract_customer_name(
+            text=text,
+            emails=emails,
+            phones=phones,
+        )
 
         return {
             "email": primary_email,
             "phone": primary_phone,
+            "customer_name": customer_name,
             "emails": emails,
             "phones": phones,
             "has_email": bool(primary_email),
             "has_phone": bool(primary_phone),
+            "has_name": bool(customer_name),
         }
+
+    def _extract_customer_name(self, *, text: str, emails: list[str], phones: list[str]) -> str | None:
+        candidate = text.strip()
+        for email in emails:
+            candidate = re.sub(re.escape(email), " ", candidate, flags=re.IGNORECASE)
+        for phone in phones:
+            candidate = candidate.replace(phone, " ")
+            digits = re.sub(r"\D", "", phone)
+            if digits:
+                candidate = re.sub(r"[\+\d][\d\-\s\(\)]{6,}\d", " ", candidate)
+
+        candidate = re.sub(
+            r"\b(мене\s+звати|моє\s+ім'?я|ім'?я|мій\s+номер|номер|телефон|phone|email|емейл|пошта)\b",
+            " ",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        candidate = re.sub(r"[^A-Za-zА-Яа-яІіЇїЄєҐґ'’`\-\s]", " ", candidate)
+        candidate = " ".join(candidate.split()).strip(" -'’`")
+
+        if not candidate:
+            return None
+
+        words = candidate.split()
+        name_words = []
+        for word in words[:3]:
+            if len(word.strip("-'’`")) < 2:
+                continue
+            name_words.append(word.strip("-'’`"))
+
+        if not name_words:
+            return None
+
+        return " ".join(name_words)
 
     def _save_captured_contact(
         self,
@@ -289,9 +342,11 @@ class BookingService:
         *,
         email: str | None,
         phone: str | None,
+        customer_name: str | None = None,
         start_dt: datetime | None = None,
     ) -> None:
         self.captured_contacts[sender_id] = {
+            "customer_name": customer_name,
             "email": email,
             "phone": phone,
             "start_dt": self._serialize_pending_start_dt(start_dt) if start_dt else None,
@@ -379,10 +434,12 @@ class BookingService:
         start_dt: datetime | None,
         email: str | None,
         phone: str | None,
+        customer_name: str | None = None,
         calendar_event_id: str | None = None,
     ) -> None:
         self.completed_bookings[sender_id] = {
             "start_dt": self._serialize_pending_start_dt(start_dt) if start_dt else None,
+            "customer_name": customer_name,
             "email": email,
             "phone": phone,
             "calendar_event_id": calendar_event_id,
@@ -436,9 +493,11 @@ class BookingService:
         start_dt: datetime | None,
         email: str | None,
         phone: str | None,
+        customer_name: str | None,
     ) -> Dict[str, Any]:
         self._save_captured_contact(
             sender_id,
+            customer_name=customer_name,
             email=email,
             phone=phone,
             start_dt=start_dt,
@@ -446,6 +505,7 @@ class BookingService:
         self._mark_booking_completed(
             sender_id,
             start_dt=start_dt,
+            customer_name=customer_name,
             email=email,
             phone=phone,
         )
@@ -455,6 +515,7 @@ class BookingService:
             "reply_text": self._build_create_failed_reply(language),
             "event_created": False,
             "booking_state": BookingState.NONE.value,
+            "customer_name": customer_name,
             "contact_email": email,
             "contact_phone": phone,
         }
@@ -853,14 +914,23 @@ class BookingService:
 
         if state == BookingState.WAITING_FOR_CONTACT:
             contact_details = self._extract_contact_details(message_text)
+            customer_name = contact_details["customer_name"] or pending.get("customer_name")
+            contact_email = contact_details["email"] or pending.get("contact_email")
+            contact_phone = contact_details["phone"] or pending.get("contact_phone")
             logger.info(
-                "booking contact received sender_id=%s has_email=%s has_phone=%s",
+                "booking contact received sender_id=%s has_name=%s has_email=%s has_phone=%s",
                 sender_id,
-                contact_details["has_email"],
-                contact_details["has_phone"],
+                bool(customer_name),
+                bool(contact_email),
+                bool(contact_phone),
             )
 
-            if not contact_details["has_email"] and not contact_details["has_phone"]:
+            pending["customer_name"] = customer_name
+            pending["contact_email"] = contact_email
+            pending["contact_phone"] = contact_phone
+
+            if not contact_email and not contact_phone and not customer_name:
+                self._save_pending_confirmation(sender_id, pending)
                 return {
                     "status": "waiting_for_contact",
                     "reply_text": self._build_contact_retry_reply(language),
@@ -869,8 +939,26 @@ class BookingService:
                     "booking_state": BookingState.WAITING_FOR_CONTACT.value,
                 }
 
-            pending["contact_email"] = contact_details["email"]
-            pending["contact_phone"] = contact_details["phone"]
+            if contact_email or contact_phone:
+                if not customer_name:
+                    self._save_pending_confirmation(sender_id, pending)
+                    return {
+                        "status": "waiting_for_name",
+                        "reply_text": self._build_name_retry_reply(language),
+                        "event_created": False,
+                        "requires_contact": True,
+                        "booking_state": BookingState.WAITING_FOR_CONTACT.value,
+                    }
+            else:
+                self._save_pending_confirmation(sender_id, pending)
+                return {
+                    "status": "waiting_for_contact",
+                    "reply_text": self._build_contact_only_retry_reply(language),
+                    "event_created": False,
+                    "requires_contact": True,
+                    "booking_state": BookingState.WAITING_FOR_CONTACT.value,
+                }
+
             pending["state"] = BookingState.CONFIRMATION.value
 
         elif state == BookingState.CONFIRMATION:
@@ -927,6 +1015,7 @@ class BookingService:
                 sender_id=sender_id,
                 language=language,
                 start_dt=start_dt,
+                customer_name=pending.get("customer_name"),
                 email=pending.get("contact_email"),
                 phone=pending.get("contact_phone"),
             )
@@ -940,12 +1029,16 @@ class BookingService:
                 sender_id=sender_id,
                 language=language,
                 start_dt=start_dt,
+                customer_name=pending.get("customer_name"),
                 email=pending.get("contact_email"),
                 phone=pending.get("contact_phone"),
             )
 
         try:
-            description_parts = [pending["description"], f"Sender ID: {sender_id}"]
+            description_parts = [pending["description"]]
+            if pending.get("customer_name"):
+                description_parts.append(f"Customer name: {pending['customer_name']}")
+            description_parts.append(f"Sender ID: {sender_id}")
             if pending.get("source_channel"):
                 description_parts.append(f"Source: {pending['source_channel']}")
             if pending.get("context_summary"):
@@ -979,12 +1072,14 @@ class BookingService:
                 sender_id=sender_id,
                 language=language,
                 start_dt=start_dt,
+                customer_name=pending.get("customer_name"),
                 email=pending.get("contact_email"),
                 phone=pending.get("contact_phone"),
             )
 
         self._save_captured_contact(
             sender_id,
+            customer_name=pending.get("customer_name"),
             email=pending.get("contact_email"),
             phone=pending.get("contact_phone"),
             start_dt=start_dt,
@@ -992,6 +1087,7 @@ class BookingService:
         self._mark_booking_completed(
             sender_id,
             start_dt=start_dt,
+            customer_name=pending.get("customer_name"),
             email=pending.get("contact_email"),
             phone=pending.get("contact_phone"),
             calendar_event_id=created.event_id,
@@ -1014,6 +1110,7 @@ class BookingService:
             "booking_state": BookingState.NONE.value,
             "event_id": created.event_id,
             "event_link": created.html_link,
+            "customer_name": pending.get("customer_name"),
             "contact_email": pending.get("contact_email"),
             "contact_phone": pending.get("contact_phone"),
         }

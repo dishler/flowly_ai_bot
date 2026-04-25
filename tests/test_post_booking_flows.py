@@ -65,6 +65,37 @@ class FailingCalendarService(CalendarService):
         raise RuntimeError("delete failed")
 
 
+class DummyConfiguredCalendarClient:
+    def is_configured(self) -> bool:
+        return True
+
+
+class RecordingCreateCalendarService(CalendarService):
+    def __init__(self) -> None:
+        super().__init__(google_calendar_client=DummyConfiguredCalendarClient())
+        self.created_descriptions = []
+
+    def check_specific_time_availability(self, start_dt, duration_minutes: int = 30) -> bool:
+        return True
+
+    def create_booking_event(
+        self,
+        start_dt,
+        duration_minutes: int = 30,
+        summary: str = "Consultation call",
+        description: str = "",
+        attendee_emails=None,
+    ):
+        self.created_descriptions.append(description)
+
+        class CreatedEvent:
+            event_id = "calendar-event-created"
+            html_link = "https://calendar.example/event"
+            status = "confirmed"
+
+        return CreatedEvent()
+
+
 @pytest.fixture
 def processor_factory():
     def build(transcript: str = "", calendar_service: CalendarService | None = None):
@@ -354,4 +385,49 @@ async def test_waiting_for_time_still_accepts_normal_booking_time(processor_fact
     assert result["intent"] == "booking_flow"
     assert "о 15:00 вільний" in result["reply_text"]
     assert "номер телефону або email" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_booking_collects_name_and_writes_calendar_description(processor_factory):
+    calendar_service = RecordingCreateCalendarService()
+    processor, _ = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    time_result = await processor.process(_message(text="Завтра о 12"))
+    contact_result = await processor.process(_message(text="Іван 0987121328"))
+
+    assert "ваше ім’я та номер телефону або email" in time_result["reply_text"]
+    assert contact_result["booking_result"]["status"] == "confirmed"
+    assert contact_result["booking_result"]["customer_name"] == "Іван"
+    assert calendar_service.created_descriptions
+    description = calendar_service.created_descriptions[0]
+    assert "Booked via Flowly Meta Bot" in description
+    assert "Customer name: Іван" in description
+    assert "Sender ID: user-1" in description
+    assert "Source: instagram" in description
+    assert "Context: Завтра о 12" in description
+    assert "Contact: Phone: 0987121328" in description
+
+
+async def test_booking_contact_only_asks_for_name(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра о 12"))
+    result = await processor.process(_message(text="0987121328"))
+
+    assert result["booking_result"]["status"] == "waiting_for_name"
+    assert result["reply_text"] == "Дякую. А підкажіть, будь ласка, ваше ім’я?"
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_booking_name_only_asks_for_contact(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра о 12"))
+    result = await processor.process(_message(text="Іван"))
+
+    assert result["booking_result"]["status"] == "waiting_for_contact"
+    assert result["reply_text"] == "Дякую. А залиште, будь ласка, номер телефону або email для підтвердження."
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
