@@ -145,14 +145,24 @@ class MessageProcessor:
         markers = [
             "вільні слоти",
             "вільний слот",
+            "вільний час",
+            "вільні години",
             "доступні слоти",
             "які слоти",
+            "який є вільний час",
+            "які є варіанти",
+            "варіанти по часу",
             "коли є",
             "коли можна",
+            "коли можна зідзвонитись",
+            "коли можна зідзвонитися",
+            "коли ви вільні",
             "в який час",
             "available slots",
             "free slots",
+            "free time",
             "what slots",
+            "what time options",
             "when are you available",
         ]
         return any(marker in normalized for marker in markers)
@@ -199,6 +209,49 @@ class MessageProcessor:
             "booking_result": booking_result,
             "outbound_result": outbound_result,
         }
+
+    def _build_direct_reply_result(
+        self,
+        *,
+        message: NormalizedMessage,
+        reply_text: str,
+        intent_value: str,
+        routing_category: str = "answered_basic",
+        intent_for_policy: IntentType = IntentType.GENERAL_QUESTION,
+    ) -> Dict[str, Any]:
+        reply_text = self.reply_service.enforce_response_policy(
+            reply_text=reply_text,
+            user_text=message.user_message,
+            intent=intent_for_policy,
+        )
+        self.memory_service.add_assistant_message(message.sender_id, reply_text)
+        outbound_result = self.outbound_service.send_reply(
+            platform=message.platform,
+            recipient_id=message.sender_id,
+            text=reply_text,
+        )
+        return {
+            "intent": intent_value,
+            "routing_category": routing_category,
+            "reply_text": reply_text,
+            "history": self.memory_service.get_history(message.sender_id),
+            "booking_result": None,
+            "outbound_result": outbound_result,
+        }
+
+    def _get_contextual_short_reply(self, text: str) -> str | None:
+        normalized = " ".join(text.strip().lower().split())
+        normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        replies = {
+            "ок": "Дякую, зафіксував.",
+            "окей": "Дякую, зафіксував.",
+            "добре": "Добре, дякую.",
+            "давай": "Добре, підкажіть, будь ласка, що саме вам зручно обговорити?",
+            "можливо потім": "Добре, без проблем. Якщо буде актуально — напишіть нам у будь-який момент.",
+            "я подумаю": "Звісно, подумайте. Якщо виникнуть питання — напишіть, я підкажу.",
+            "це не питання це пропозиція": "Дякую за повідомлення. Наш спеціаліст зв’яжеться з вами найближчим часом.",
+        }
+        return replies.get(normalized)
 
     def _handle_confirmed_booking_message(self, message: NormalizedMessage) -> Dict[str, Any] | None:
         language = self.reply_service.detect_user_language(message.user_message)
@@ -317,7 +370,10 @@ class MessageProcessor:
         resolved_text = await self._resolve_message_text(message)
 
         if not resolved_text:
-            reply_text = "Не зовсім розібрав голосове повідомлення. Можете коротко написати текстом?"
+            reply_text = (
+                "Не вдалося розпізнати аудіо. Напишіть, будь ласка, повідомлення текстом "
+                "або надішліть голосове ще раз."
+            )
 
             outbound_result = self.outbound_service.send_reply(
                 platform=message.platform,
@@ -390,12 +446,16 @@ class MessageProcessor:
                 return confirmed_result
 
         if self._looks_like_availability_question(message.user_message):
-            language = self.reply_service.detect_user_language(message.user_message)
-            reply_text = self.booking_service.get_availability_question_reply(language)
+            booking_result = self.booking_service.handle_availability_question(
+                sender_id=message.sender_id,
+                message_text=message.user_message,
+                source_channel=message.platform,
+            )
             return self._build_booking_reply_result(
                 message=message,
-                reply_text=reply_text,
+                reply_text=booking_result["reply_text"],
                 intent_value="booking_availability_question",
+                booking_result=booking_result,
             )
 
         if self._looks_like_call_explanation_question(message.user_message):
@@ -405,6 +465,14 @@ class MessageProcessor:
                 message=message,
                 reply_text=reply_text,
                 intent_value="booking_call_explanation",
+            )
+
+        contextual_short_reply = self._get_contextual_short_reply(message.user_message)
+        if contextual_short_reply:
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=contextual_short_reply,
+                intent_value="contextual_short_reply",
             )
 
         intent = self.intent_service.detect_intent(message.user_message)

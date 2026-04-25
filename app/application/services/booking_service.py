@@ -178,15 +178,43 @@ class BookingService:
             return "Добре, я скасував ваш дзвінок. Якщо буде актуально — можемо запланувати інший час."
         return "Okay, I cancelled your call. If it becomes relevant again, we can schedule another time."
 
+    def _build_cancel_handoff_reply(self, language: str) -> str:
+        if language == "uk":
+            return "Добре, я передам спеціалісту, щоб дзвінок скасували."
+        return "Okay, I will pass this to a specialist so the call is cancelled."
+
     def _build_call_explanation_reply(self, language: str) -> str:
         if language == "uk":
             return "На дзвінку ми коротко розберемо ваш кейс, задачі і підкажемо, як бот може працювати саме у вас."
         return "On the call, we will briefly review your case and goals, then explain how the bot can work for your business."
 
-    def _build_availability_question_reply(self, language: str) -> str:
+    def _build_availability_question_reply(self, language: str, slots_by_day: dict[str, list[datetime]]) -> str:
         if language == "uk":
-            return "Підкажіть, будь ласка, на який день вам зручно, і я запропоную доступні слоти."
-        return "Please tell me which day works for you, and I will suggest available slots."
+            tomorrow_times = self._format_slot_times(slots_by_day.get("tomorrow", []), language)
+            day_after_times = self._format_slot_times(slots_by_day.get("day_after_tomorrow", []), language)
+            if tomorrow_times and day_after_times:
+                return (
+                    f"Можемо запропонувати кілька варіантів: завтра {tomorrow_times}, "
+                    f"а також післязавтра {day_after_times}. Який день і час вам найзручніший?"
+                )
+            if tomorrow_times:
+                return f"Можемо запропонувати завтра {tomorrow_times}. Який час вам найзручніший?"
+            if day_after_times:
+                return f"Можемо запропонувати післязавтра {day_after_times}. Який час вам найзручніший?"
+            return "Можемо підібрати час для дзвінка. Підкажіть, будь ласка, який день вам зручний?"
+
+        tomorrow_times = self._format_slot_times(slots_by_day.get("tomorrow", []), language)
+        day_after_times = self._format_slot_times(slots_by_day.get("day_after_tomorrow", []), language)
+        if tomorrow_times and day_after_times:
+            return (
+                f"We can offer a few options: tomorrow {tomorrow_times}, "
+                f"and the day after tomorrow {day_after_times}. Which day and time works best?"
+            )
+        if tomorrow_times:
+            return f"We can offer tomorrow {tomorrow_times}. What time works best?"
+        if day_after_times:
+            return f"We can offer the day after tomorrow {day_after_times}. What time works best?"
+        return "We can find a time for the call. Which day would work for you?"
 
     def _build_confirm_prompt_reply(self, language: str) -> str:
         if language == "uk":
@@ -273,10 +301,66 @@ class BookingService:
         return self._build_call_explanation_reply(language)
 
     def get_availability_question_reply(self, language: str) -> str:
-        return self._build_availability_question_reply(language)
+        return self._build_availability_question_reply(
+            language=language,
+            slots_by_day=self._get_suggested_slots_by_day(),
+        )
+
+    def handle_availability_question(
+        self,
+        sender_id: str,
+        message_text: str,
+        source_channel: str | None = None,
+    ) -> Dict[str, Any]:
+        language = self._detect_language(message_text)
+        slots_by_day = self._get_suggested_slots_by_day()
+        self._save_booking_state(
+            sender_id,
+            state=BookingState.WAITING_FOR_TIME,
+            language=language,
+            source_channel=source_channel,
+            context_summary=message_text[:280],
+        )
+        pending = self._get_pending_confirmation(sender_id) or {}
+        pending["availability_context"] = True
+        pending["suggested_slots"] = [
+            {
+                "day_key": day_key,
+                "start_dt": self._serialize_pending_start_dt(slot),
+            }
+            for day_key, slots in slots_by_day.items()
+            for slot in slots
+        ]
+        pending["last_suggested_day"] = "tomorrow"
+        self._save_pending_confirmation(sender_id, pending)
+
+        return {
+            "status": "availability_suggested",
+            "reply_text": self._build_availability_question_reply(language, slots_by_day),
+            "booking_state": BookingState.WAITING_FOR_TIME.value,
+            "suggested_slots": pending["suggested_slots"],
+        }
 
     def cancel_confirmed_booking(self, sender_id: str, message_text: str) -> Dict[str, Any]:
         language = self._detect_language(message_text)
+        completed_booking = self.completed_bookings.get(sender_id) or {}
+        calendar_event_id = completed_booking.get("calendar_event_id") or completed_booking.get("event_id")
+
+        if calendar_event_id:
+            try:
+                self.calendar_service.delete_event(calendar_event_id)
+            except Exception:
+                logger.exception(
+                    "calendar event deletion failed sender_id=%s calendar_event_id=%s",
+                    sender_id,
+                    calendar_event_id,
+                )
+                return {
+                    "status": "cancel_handoff",
+                    "reply_text": self._build_cancel_handoff_reply(language),
+                    "booking_state": BookingState.NONE.value,
+                }
+
         self.completed_bookings.pop(sender_id, None)
         self._clear_pending_confirmation(sender_id)
         return {
@@ -292,11 +376,13 @@ class BookingService:
         start_dt: datetime | None,
         email: str | None,
         phone: str | None,
+        calendar_event_id: str | None = None,
     ) -> None:
         self.completed_bookings[sender_id] = {
             "start_dt": self._serialize_pending_start_dt(start_dt) if start_dt else None,
             "email": email,
             "phone": phone,
+            "calendar_event_id": calendar_event_id,
         }
 
     def get_reschedule_reply(self, language: str) -> str:
@@ -369,6 +455,171 @@ class BookingService:
             "contact_email": email,
             "contact_phone": phone,
         }
+
+    def _get_suggested_slots_by_day(self) -> dict[str, list[datetime]]:
+        now = datetime.now(self.timezone)
+        candidates = {
+            "tomorrow": [
+                (now + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0),
+                (now + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0),
+            ],
+            "day_after_tomorrow": [
+                (now + timedelta(days=2)).replace(hour=11, minute=0, second=0, microsecond=0),
+                (now + timedelta(days=2)).replace(hour=16, minute=0, second=0, microsecond=0),
+            ],
+        }
+
+        client = self.calendar_service.google_calendar_client
+        if not client or not client.is_configured():
+            return candidates
+
+        checked: dict[str, list[datetime]] = {}
+        for day_key, slots in candidates.items():
+            checked[day_key] = []
+            for slot in slots:
+                try:
+                    if self.calendar_service.check_specific_time_availability(slot, duration_minutes=30):
+                        checked[day_key].append(slot)
+                except Exception:
+                    logger.exception("suggested slot availability check failed start_dt=%s", slot.isoformat())
+            if not checked[day_key]:
+                checked.pop(day_key, None)
+
+        return checked or candidates
+
+    def _format_slot_times(self, slots: list[datetime], language: str) -> str:
+        times = [slot.strftime("%H:%M") for slot in slots]
+        if not times:
+            return ""
+        if language == "uk":
+            if len(times) == 1:
+                return f"о {times[0]}"
+            return "о " + " або ".join(times)
+        if len(times) == 1:
+            return f"at {times[0]}"
+        return "at " + " or ".join(times)
+
+    def _suggested_slots_from_pending(self, pending: dict[str, Any]) -> dict[str, list[datetime]]:
+        slots_by_day: dict[str, list[datetime]] = {}
+        for item in pending.get("suggested_slots", []):
+            day_key = item.get("day_key")
+            raw_start_dt = item.get("start_dt")
+            if not day_key or not raw_start_dt:
+                continue
+            try:
+                slots_by_day.setdefault(day_key, []).append(
+                    self._deserialize_pending_start_dt(raw_start_dt)
+                )
+            except Exception:
+                logger.warning("invalid suggested slot skipped: %r", item)
+        return slots_by_day or self._get_suggested_slots_by_day()
+
+    def _detect_requested_day_key(self, text: str) -> str | None:
+        normalized = text.strip().lower()
+        if "післязавтра" in normalized or "day after tomorrow" in normalized:
+            return "day_after_tomorrow"
+        if "завтра" in normalized or "tomorrow" in normalized:
+            return "tomorrow"
+        return None
+
+    def _extract_hour_only(self, text: str) -> int | None:
+        normalized = text.strip().lower()
+        match = re.fullmatch(r"(?:о|на|at)?\s*(\d{1,2})(?::00)?", normalized)
+        if not match:
+            return None
+        hour = int(match.group(1))
+        if 0 <= hour <= 23:
+            return hour
+        return None
+
+    def _build_day_slots_reply(self, language: str, day_key: str, slots: list[datetime]) -> str:
+        day_label_uk = "завтра" if day_key == "tomorrow" else "післязавтра"
+        day_label_en = "tomorrow" if day_key == "tomorrow" else "the day after tomorrow"
+        times = self._format_slot_times(slots, language)
+        if language == "uk":
+            if times:
+                return f"Добре, {day_label_uk} можемо запропонувати {times}. Який час вам зручніший?"
+            return f"Добре, підкажіть, будь ласка, який час {day_label_uk} вам зручний?"
+        if times:
+            return f"Okay, {day_label_en} we can offer {times}. What time works best?"
+        return f"Okay, what time {day_label_en} would work for you?"
+
+    def _process_availability_followup(
+        self,
+        sender_id: str,
+        message_text: str,
+        pending: dict[str, Any],
+        source_channel: str | None,
+    ) -> Dict[str, Any] | None:
+        requested_dt = self._parse_requested_datetime(message_text)
+        if requested_dt is not None:
+            return self.start_booking_flow(
+                sender_id=sender_id,
+                message_text=message_text,
+                source_channel=source_channel or pending.get("source_channel"),
+            )
+
+        language = pending.get("language") or self._detect_language(message_text)
+        slots_by_day = self._suggested_slots_from_pending(pending)
+        requested_day_key = self._detect_requested_day_key(message_text)
+        if requested_day_key:
+            pending["last_suggested_day"] = requested_day_key
+            self._save_pending_confirmation(sender_id, pending)
+            return {
+                "status": "availability_day_selected",
+                "reply_text": self._build_day_slots_reply(
+                    language,
+                    requested_day_key,
+                    slots_by_day.get(requested_day_key, []),
+                ),
+                "booking_state": BookingState.WAITING_FOR_TIME.value,
+            }
+
+        requested_hour = self._extract_hour_only(message_text)
+        if requested_hour is None:
+            return None
+
+        preferred_day = pending.get("last_suggested_day") or "tomorrow"
+        candidate_slots = slots_by_day.get(preferred_day, [])
+        matched_slot = next((slot for slot in candidate_slots if slot.hour == requested_hour), None)
+        if matched_slot is None:
+            for day_key, slots in slots_by_day.items():
+                matched_slot = next((slot for slot in slots if slot.hour == requested_hour), None)
+                if matched_slot is not None:
+                    preferred_day = day_key
+                    break
+
+        if matched_slot is None:
+            return {
+                "status": "availability_time_not_offered",
+                "reply_text": self._build_day_slots_reply(
+                    language,
+                    preferred_day,
+                    candidate_slots,
+                ),
+                "booking_state": BookingState.WAITING_FOR_TIME.value,
+            }
+
+        day_text_by_language = {
+            "uk": {
+                "tomorrow": "завтра",
+                "day_after_tomorrow": "післязавтра",
+            },
+            "en": {
+                "tomorrow": "tomorrow",
+                "day_after_tomorrow": "day after tomorrow",
+            },
+        }
+        day_text = day_text_by_language.get(language, day_text_by_language["en"]).get(
+            preferred_day,
+            "tomorrow",
+        )
+        booking_text = f"{day_text} о {matched_slot.hour}" if language == "uk" else f"{day_text} at {matched_slot.hour}"
+        return self.start_booking_flow(
+            sender_id=sender_id,
+            message_text=booking_text,
+            source_channel=source_channel or pending.get("source_channel"),
+        )
 
     def _serialize_pending_start_dt(self, value: datetime) -> str:
         if value.tzinfo is None:
@@ -581,6 +832,16 @@ class BookingService:
             }
 
         if state == BookingState.WAITING_FOR_TIME:
+            if pending.get("availability_context"):
+                availability_result = self._process_availability_followup(
+                    sender_id=sender_id,
+                    message_text=message_text,
+                    pending=pending,
+                    source_channel=source_channel,
+                )
+                if availability_result is not None:
+                    return availability_result
+
             return self.start_booking_flow(
                 sender_id=sender_id,
                 message_text=message_text,
@@ -730,6 +991,7 @@ class BookingService:
             start_dt=start_dt,
             email=pending.get("contact_email"),
             phone=pending.get("contact_phone"),
+            calendar_event_id=created.event_id,
         )
         self._clear_pending_confirmation(sender_id)
 

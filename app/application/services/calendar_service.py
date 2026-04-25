@@ -108,4 +108,10 @@ class CalendarService:
             description=description,
             attendee_emails=attendee_emails or [],
         )
+
+    def delete_event(self, event_id: str) -> None:
+        if not self.google_calendar_client or not self.google_calendar_client.is_configured():
+            raise RuntimeError("Google Calendar is not configured for event deletion.")
+
+        self.google_calendar_client.delete_event(event_id)
         

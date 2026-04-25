@@ -286,3 +286,41 @@ class GoogleCalendarClient:
             raise GoogleCalendarClientError(
                 f"Unexpected Google Calendar create event error: {exc}"
             ) from exc
+
+    def delete_event(self, event_id: str) -> None:
+        if not event_id:
+            raise GoogleCalendarClientError("event_id is required.")
+
+        try:
+            service = self._get_service()
+
+            logger.info(
+                "calendar delete_event start calendar_id=%s event_id=%s",
+                self.calendar_id,
+                event_id,
+            )
+
+            (
+                service.events()
+                .delete(
+                    calendarId=self.calendar_id,
+                    eventId=event_id,
+                    sendUpdates="none",
+                )
+                .execute()
+            )
+
+            logger.info(
+                "calendar delete_event success calendar_id=%s event_id=%s",
+                self.calendar_id,
+                event_id,
+            )
+
+        except HttpError as exc:
+            raise GoogleCalendarClientError(
+                f"Google Calendar delete event failed: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise GoogleCalendarClientError(
+                f"Unexpected Google Calendar delete event error: {exc}"
+            ) from exc
