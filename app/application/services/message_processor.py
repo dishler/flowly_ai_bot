@@ -318,6 +318,25 @@ class MessageProcessor:
             "on a call so we can suggest the best setup. Please tell me when it would be convenient."
         )
 
+    def _can_answer_faq_during_waiting_for_time(self, intent: IntentType, text: str) -> bool:
+        if intent in {IntentType.PRICE, IntentType.CHANNELS, IntentType.SERVICE_DESCRIPTION}:
+            return True
+        normalized = text.strip().lower()
+        faq_markers = [
+            "скільки коштує",
+            "ціна",
+            "вартість",
+            "канали",
+            "instagram",
+            "facebook",
+            "whatsapp",
+            "telegram",
+            "що входить",
+            "що ви робите",
+            "чим займаєтесь",
+        ]
+        return any(marker in normalized for marker in faq_markers)
+
     def _handle_confirmed_booking_message(self, message: NormalizedMessage) -> Dict[str, Any] | None:
         language = self.reply_service.detect_user_language(message.user_message)
 
@@ -463,6 +482,42 @@ class MessageProcessor:
         routing_category = "answered_basic"
         booking_state = self.booking_service.get_booking_state(message.sender_id)
         logger.info("Booking state: %s", booking_state.value)
+
+        early_intent = self.intent_service.detect_intent(message.user_message)
+        if (
+            booking_state == BookingState.WAITING_FOR_TIME
+            and self._can_answer_faq_during_waiting_for_time(early_intent, message.user_message)
+        ):
+            logger.info(
+                "Answering FAQ during WAITING_FOR_TIME and clearing stale booking state: %s",
+                early_intent.value,
+            )
+            self.booking_service.clear_booking_state(message.sender_id)
+            reply_text = self.reply_service.generate_reply(message, intent=early_intent)
+            reply_text = self.reply_service.enforce_response_policy(
+                reply_text=reply_text,
+                user_text=message.user_message,
+                intent=early_intent,
+            )
+            reply_text = self._finalize_general_reply_text(
+                sender_id=message.sender_id,
+                user_text=message.user_message,
+                reply_text=reply_text,
+            )
+            self.memory_service.add_assistant_message(message.sender_id, reply_text)
+            outbound_result = self.outbound_service.send_reply(
+                platform=message.platform,
+                recipient_id=message.sender_id,
+                text=reply_text,
+            )
+            return {
+                "intent": early_intent.value,
+                "routing_category": "answered_basic",
+                "reply_text": reply_text,
+                "history": self.memory_service.get_history(message.sender_id),
+                "booking_result": None,
+                "outbound_result": outbound_result,
+            }
 
         if booking_state != BookingState.NONE:
             booking_result = self.booking_service.process_booking_message(

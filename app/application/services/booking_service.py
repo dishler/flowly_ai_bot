@@ -72,6 +72,9 @@ class BookingService:
             return
         self.pending_confirmations.pop(sender_id, None)
 
+    def clear_booking_state(self, sender_id: str) -> None:
+        self._clear_pending_confirmation(sender_id)
+
     def _save_booking_state(
         self,
         sender_id: str,

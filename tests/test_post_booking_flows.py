@@ -330,3 +330,28 @@ async def test_soft_followup_decline_does_not_start_booking(processor_factory):
     )
     assert result["routing_category"] == "answered_basic"
     assert result["booking_result"] is None
+
+
+async def test_price_overrides_stale_waiting_for_time_booking_state(processor_factory):
+    processor, booking_service = processor_factory()
+
+    start_result = await processor.process(_message(text="давайте дзвінок"))
+    price_result = await processor.process(_message(text="вітаю, скільки коштує бот?"))
+
+    assert start_result["booking_result"]["booking_state"] == "WAITING_FOR_TIME"
+    assert price_result["intent"] == "price"
+    assert "Вартість стартує від 200$" in price_result["reply_text"]
+    assert "Підкажіть, будь ласка, точний день і час." not in price_result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_waiting_for_time_still_accepts_normal_booking_time(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="давайте дзвінок"))
+    result = await processor.process(_message(text="завтра о 15"))
+
+    assert result["intent"] == "booking_flow"
+    assert "о 15:00 вільний" in result["reply_text"]
+    assert "номер телефону або email" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
