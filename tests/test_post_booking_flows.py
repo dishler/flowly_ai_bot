@@ -283,3 +283,20 @@ async def test_short_contextual_replies_do_not_use_complex_fallback(processor_fa
 
     assert result["reply_text"] == reply
     assert result["routing_category"] != "escalate_to_human"
+
+
+async def test_business_details_after_price_prompt_call_not_slots(processor_factory):
+    processor, _ = processor_factory()
+
+    price_result = await processor.process(_message(text="Скільки коштує бот?"))
+    detail_result = await processor.process(_message(text="у мене СТО, треба відповідати клієнтам"))
+
+    assert "Можемо коротко обговорити ваш кейс на дзвінку" in price_result["reply_text"]
+    assert "Можу зорієнтувати точніше під ваш кейс" not in price_result["reply_text"]
+    assert detail_result["intent"] == "price_followup_case_details"
+    assert detail_result["reply_text"] == (
+        "Зрозумів, дякую за деталі. У вашому випадку краще коротко обговорити "
+        "на дзвінку, щоб підібрати оптимальне рішення. Підкажіть, будь ласка, "
+        "коли вам буде зручно?"
+    )
+    assert "Можемо запропонувати кілька варіантів" not in detail_result["reply_text"]

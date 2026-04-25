@@ -253,6 +253,61 @@ class MessageProcessor:
         }
         return replies.get(normalized)
 
+    def _has_recent_price_reply(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if "вартість стартує" in normalized or "pricing starts" in normalized:
+                return True
+        return False
+
+    def _looks_like_business_details(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        detail_markers = [
+            "у мене",
+            "маю",
+            "наш бізнес",
+            "потрібно",
+            "треба",
+            "хочу",
+            "задача",
+            "задачі",
+            "клієнт",
+            "заявк",
+            "запит",
+            "послуг",
+            "менеджер",
+            "команд",
+            "сто",
+            "автосерв",
+            "салон",
+            "клінік",
+            "стомат",
+            "магазин",
+            "ресторан",
+            "студія",
+            "школа",
+            "курс",
+            "нерухом",
+        ]
+        return any(marker in normalized for marker in detail_markers)
+
+    def _get_price_followup_case_reply(self, text: str) -> str:
+        language = self.reply_service.detect_user_language(text)
+        if language == "uk":
+            return (
+                "Зрозумів, дякую за деталі. У вашому випадку краще коротко обговорити "
+                "на дзвінку, щоб підібрати оптимальне рішення. Підкажіть, будь ласка, "
+                "коли вам буде зручно?"
+            )
+        return (
+            "Got it, thank you for the details. In your case, it is better to discuss it briefly "
+            "on a call so we can suggest the best setup. Please tell me when it would be convenient."
+        )
+
     def _handle_confirmed_booking_message(self, message: NormalizedMessage) -> Dict[str, Any] | None:
         language = self.reply_service.detect_user_language(message.user_message)
 
@@ -473,6 +528,21 @@ class MessageProcessor:
                 message=message,
                 reply_text=contextual_short_reply,
                 intent_value="contextual_short_reply",
+            )
+
+        if (
+            self._has_recent_price_reply(message.sender_id)
+            and self._looks_like_business_details(message.user_message)
+            and not self._looks_like_booking_message(message.user_message)
+            and not self._looks_like_reschedule_request(message.user_message)
+            and not self._looks_like_cancel_request(message.user_message)
+        ):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_price_followup_case_reply(message.user_message),
+                intent_value="price_followup_case_details",
+                routing_category="consultation_cta",
+                intent_for_policy=IntentType.BOOKING_REQUEST,
             )
 
         intent = self.intent_service.detect_intent(message.user_message)
