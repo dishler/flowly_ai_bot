@@ -539,3 +539,22 @@ async def test_booking_with_contact_in_initial_message(processor_factory):
     assert "подтвердили" in result["booking_result"]["reply_text"] or "підтвердили" in result["booking_result"]["reply_text"]
     assert result["booking_result"]["event_created"] is True
     assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_booking_slot_suggestion_and_confirmation(processor_factory):
+    processor, booking_service = processor_factory()
+
+    # Request a busy slot
+    result1 = await processor.process(_message(text="давай дзвінок завтра 12:30"))
+    assert result1["booking_result"]["status"] == "slot_suggested"
+    assert "Як щодо" in result1["booking_result"]["reply_text"]
+
+    # Confirm with "ок"
+    result2 = await processor.process(_message(text="ок"))
+    assert result2["intent"] == "booking_request"
+    assert result2["booking_result"]["status"] == "waiting_for_contact"
+
+    # Provide contact
+    result3 = await processor.process(_message(text="Іван 0991234567"))
+    assert result3["booking_result"]["status"] == "confirmed"
+    assert "Супер, Іван" in result3["booking_result"]["reply_text"]
