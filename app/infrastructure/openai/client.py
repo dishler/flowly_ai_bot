@@ -64,7 +64,7 @@ class OpenAIClient:
             "- If the user asks what is included, answer only with what is actually included in the service.\n"
             "- If the user asks about supported channels, answer consistently with the knowledge base.\n"
             "- If the user asks whether Flowly works with WhatsApp or Telegram, do not deny it if those channels are present in the knowledge base.\n"
-            "- If the user asks about price, say pricing starts from 300 USD, but do not present it as a fixed price for every case.\n"
+            "- If the user asks about price, say pricing starts from 200 USD, but do not present it as a fixed price for every case.\n"
             "- Use the knowledge base as the only factual grounding source.\n"
             "- If the grounding context and your prior assumptions conflict, follow the grounding context.\n"
             "- Do not invent features, channels, integrations, timelines, guarantees, or business results that are not confirmed in the grounding context.\n"

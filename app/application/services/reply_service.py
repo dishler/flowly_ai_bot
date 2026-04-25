@@ -50,7 +50,7 @@ class ReplyService:
     def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
         if language == "en":
             if intent == IntentType.PRICE:
-                return "Pricing starts from $300, depending on the scope. Want me to estimate the budget for your case or have a specialist follow up?"
+                return "Pricing starts from $200, depending on the scope. We can briefly discuss your case on a call, or I can pass the request to a specialist."
             if intent == IntentType.CHANNELS:
                 return "We work not only with Instagram, but also with Facebook, WhatsApp, and Telegram. If you want, I can suggest which channel would fit your case best."
             if intent == IntentType.SERVICE_DESCRIPTION:
@@ -60,7 +60,7 @@ class ReplyService:
             return "We can set up automated replies, lead qualification, booking, and reminders in messengers. If you want, our specialist can briefly explain how this would look for your case."
 
         if intent == IntentType.PRICE:
-            return "Вартість стартує від 300$, але залежить від задач. Хочете, зорієнтую по бюджету під ваш кейс або передам ваш запит спеціалісту?"
+            return "Вартість стартує від 200$, але залежить від задач. Можемо коротко обговорити ваш кейс на дзвінку або я передам запит спеціалісту."
         if intent == IntentType.CHANNELS:
             return "Працюємо не лише з Instagram, а й з Facebook, WhatsApp і Telegram. Можу підказати, що краще підійде саме вам, або наш спеціаліст може коротко проконсультувати."
         if intent == IntentType.SERVICE_DESCRIPTION:
@@ -220,7 +220,7 @@ class ReplyService:
     def _get_pricing_reply(self, language: str) -> str:
         if language == "uk":
             return (
-                "Вартість стартує від 300$, але залежить від задач, каналів і складності "
+                "Вартість стартує від 200$, але залежить від задач, каналів і складності "
                 "налаштування. Можемо коротко обговорити ваш кейс на дзвінку або я передам запит спеціалісту."
             )
 
