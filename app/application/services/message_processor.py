@@ -439,6 +439,8 @@ class MessageProcessor:
             "якщо вам ок.",
             "коротко обговорити на дзвінку",
             "коротко прикинути сценарій",
+            "розглянути ваш кейс на дзвінку",
+            "на дзвінку і поспілкуватися",
         ]
         for item in reversed(previous_items[-4:]):
             if not item.startswith("assistant:"):

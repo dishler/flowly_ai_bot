@@ -892,7 +892,7 @@ async def test_availability_question_while_waiting_for_time_returns_slots(proces
     [
         ("що бот буде питати в клієнта?", "ім’я"),
         ("а ціни на ремонт він може рахувати?", "Точну вартість ремонту"),
-        ("це дорого", "можна почати з базового сценарію"),
+        ("це дорого", "розглянути ваш кейс на дзвінку"),
     ],
 )
 async def test_sales_edge_questions_get_specific_replies(processor_factory, text, expected):
@@ -902,6 +902,30 @@ async def test_sales_edge_questions_get_specific_replies(processor_factory, text
 
     assert expected in result["reply_text"]
     assert "уточнити деталі" not in result["reply_text"]
+
+
+async def test_price_objection_has_soft_call_cta_and_acceptance_starts_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    objection = await processor.process(_message(text="це дорого"))
+    accepted = await processor.process(_message(text="давайте"))
+
+    assert "розглянути ваш кейс на дзвінку" in objection["reply_text"]
+    assert "гроші ростуть на дереві" in objection["reply_text"]
+    assert accepted["intent"] == "booking_request"
+    assert accepted["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_price_objection_rejection_does_not_start_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="це дорого"))
+    result = await processor.process(_message(text="не треба"))
+
+    assert result["intent"] == "rejection"
+    assert "Зрозумів, дякую" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
 @pytest.mark.parametrize(
