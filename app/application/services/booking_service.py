@@ -157,7 +157,7 @@ class BookingService:
         normalized = text.strip().lower()
         rejections = {
             "no", "nope", "not now", "cancel",
-            "ні", "не", "скасувати", "не треба",
+            "ні", "не", "скасувати", "не треба", "не знаю",
         }
         rejection_markers = [
             "скасуйте",
@@ -166,6 +166,12 @@ class BookingService:
             "відмініть",
             "cancel",
             "not now",
+            "пізніше",
+            "потім",
+            "не зараз",
+            "ще не знаю",
+            "напишу пізніше",
+            "пізніше напишу",
         ]
         return normalized in rejections or any(marker in normalized for marker in rejection_markers)
 

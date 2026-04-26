@@ -281,6 +281,7 @@ class MessageProcessor:
         product_markers = [
             "що ви пропонуєте",
             "що ви робите",
+            "що робите",
             "що робить",
             "як це працює",
             "для кого",
@@ -340,11 +341,41 @@ class MessageProcessor:
         ]
         return any(marker in normalized for marker in bot_markers)
 
+    def _wants_more_info_before_booking(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "спочатку",
+            "спершу",
+            "перед тим",
+            "ще питання",
+            "є питання",
+            "хочу зрозуміти",
+            "цікавить спочатку",
+            "хай",
+            "привіт",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _looks_like_booking_pause_or_postpone(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "пізніше",
+            "потім",
+            "не зараз",
+            "ще не знаю",
+            "напишу пізніше",
+            "пізніше напишу",
+            "я подумаю",
+            "давайте пізніше",
+        ]
+        return any(marker in normalized for marker in markers)
+
     def _build_booking_product_question_reply(
         self,
         *,
         message: NormalizedMessage,
         booking_state: BookingState,
+        include_booking_prompt: bool = True,
     ) -> str:
         normalized = self._normalize_for_conversation_matching(message.user_message)
         intent = self.intent_service.detect_intent(message.user_message)
@@ -352,6 +383,9 @@ class MessageProcessor:
             intent = IntentType.GENERAL_QUESTION
 
         reply_text = self.reply_service.generate_reply(message, intent=intent)
+        if not include_booking_prompt:
+            return reply_text
+
         if booking_state == BookingState.WAITING_FOR_CONTACT:
             reply_text = (
                 f"{reply_text}\n\n"
@@ -461,6 +495,12 @@ class MessageProcessor:
 
         if reply_text.startswith("Супер, тоді бронюємо") and "Залиште, будь ласка" in reply_text:
             return "Так, цей варіант підходить. Залиште, будь ласка, ваше ім’я та номер телефону або email."
+
+        if reply_text.startswith("Вартість стартує від 200$"):
+            return (
+                "Так, стартова вартість від 200$. Точніше залежить від каналів, сценарію "
+                "і потрібних інтеграцій, тому фінальну суму краще рахувати під конкретний кейс."
+            )
 
         if reply_text == "Добре, зрозумів.":
             return "Все ок, не турбую."
@@ -842,6 +882,20 @@ class MessageProcessor:
         logger.info("Booking state: %s", booking_state.value)
 
         if booking_state != BookingState.NONE:
+            if self._looks_like_booking_pause_or_postpone(message.user_message):
+                booking_result = self.booking_service.process_booking_message(
+                    sender_id=message.sender_id,
+                    message_text=message.user_message,
+                    source_channel=message.platform,
+                )
+                if booking_result is not None:
+                    return self._build_booking_reply_result(
+                        message=message,
+                        reply_text=booking_result["reply_text"],
+                        intent_value="booking_flow",
+                        booking_result=booking_result,
+                    )
+
             if (
                 booking_state == BookingState.WAITING_FOR_TIME
                 and self._looks_like_product_question_during_booking(message.user_message)
@@ -849,6 +903,7 @@ class MessageProcessor:
                 reply_text = self._build_booking_product_question_reply(
                     message=message,
                     booking_state=booking_state,
+                    include_booking_prompt=not self._wants_more_info_before_booking(message.user_message),
                 )
                 return self._build_direct_reply_result(
                     message=message,

@@ -1566,3 +1566,29 @@ async def test_price_and_call_typos_after_niche_reply_do_not_fallback(processor_
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
     for result in [price, accepted, typo_call, call, availability]:
         assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_booking_state_does_not_push_time_when_lead_still_has_questions(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="давай кол"))
+    service = await processor.process(_message(text="хай, що робите?"))
+    niche = await processor.process(
+        _message(text="мене цікавить спочатку чи підійде мені такий бот для сто і що він може робить?")
+    )
+    price = await processor.process(_message(text="ще пиитання яка вартість"))
+    postponed = await processor.process(_message(text="давайте я піізніше напишу бо ще не знаю"))
+
+    assert service["intent"] == "booking_product_question"
+    assert "AI-бот" in service["reply_text"]
+    assert "Для дзвінка підкажіть" not in service["reply_text"]
+    assert niche["intent"] == "booking_product_question"
+    assert "для автосервісу" in niche["reply_text"]
+    assert "Для дзвінка підкажіть" not in niche["reply_text"]
+    assert price["intent"] == "booking_product_question"
+    assert "Вартість стартує від 200$" in price["reply_text"]
+    assert "Для дзвінка підкажіть" not in price["reply_text"]
+    assert postponed["intent"] == "booking_flow"
+    assert postponed["booking_result"]["status"] == "cancelled"
+    assert "Підкажіть, будь ласка, точний день і час" not in postponed["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
