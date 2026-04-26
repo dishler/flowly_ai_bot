@@ -912,6 +912,37 @@ async def test_industries_reply_contains_service_businesses_and_auto_service(pro
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
 
 
+async def test_auto_service_fit_question_gets_specific_reply(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="для СТО підходить?"))
+
+    assert result["intent"] == "niche_fit"
+    assert "для автосервісу" in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_auto_service_context_followup_gets_specific_reply(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="так підкажи, ми автосервіс"))
+
+    assert result["intent"] == "niche_fit"
+    assert "для автосервісу" in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_after_hours_question_gets_24_7_value_reply(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="а якщо клієнт пише вночі?"))
+
+    assert result["intent"] == "after_hours_question"
+    assert "вночі" in result["reply_text"]
+    assert "заявк" in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
 async def test_rejection_does_not_offer_call(processor_factory):
     processor, _ = processor_factory()
 

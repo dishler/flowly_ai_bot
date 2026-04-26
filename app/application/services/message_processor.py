@@ -383,6 +383,24 @@ class MessageProcessor:
         ]
         return any(marker in normalized for marker in detail_markers)
 
+    def _looks_like_after_hours_question(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        markers = [
+            "вночі",
+            "уночі",
+            "ночі",
+            "після робочого часу",
+            "поза робочим часом",
+            "неробочий час",
+            "коли ми не працюємо",
+            "24/7",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _get_niche_fit_reply(self, text: str) -> str | None:
+        language = self.reply_service.detect_user_language(text)
+        return self.reply_service.get_niche_fit_reply(text, language)
+
     def _get_price_followup_case_reply(self, text: str) -> str:
         language = self.reply_service.detect_user_language(text)
         if language == "uk":
@@ -611,6 +629,15 @@ class MessageProcessor:
                 intent_value="booking_call_explanation",
             )
 
+        if self._looks_like_after_hours_question(message.user_message):
+            language = self.reply_service.detect_user_language(message.user_message)
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.get_after_hours_reply(language),
+                intent_value="after_hours_question",
+                routing_category="answered_basic",
+            )
+
         if (
             self._has_recent_soft_call_cta(message.sender_id)
             and self._looks_like_interest_booking_acceptance(message.user_message)
@@ -663,6 +690,15 @@ class MessageProcessor:
                 intent_value="price_followup_case_details",
                 routing_category="consultation_cta",
                 intent_for_policy=IntentType.BOOKING_REQUEST,
+            )
+
+        niche_fit_reply = self._get_niche_fit_reply(message.user_message)
+        if niche_fit_reply:
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=niche_fit_reply,
+                intent_value="niche_fit",
+                routing_category="consultation_cta",
             )
 
         intent = self.intent_service.detect_intent(message.user_message)

@@ -295,6 +295,13 @@ class ReplyService:
             "відповідати, кваліфікувати заявку або доводити до запису."
         )
 
+    def get_after_hours_reply(self, language: str) -> str:
+        return (
+            "Якщо клієнт пише вночі, бот може одразу відповісти, прийняти заявку, "
+            "уточнити базові деталі й зібрати контакт. А вже зранку менеджер бачить "
+            "готове звернення і може швидко продовжити діалог."
+        )
+
     def _get_interest_signal_reply(self, language: str) -> str:
         if language == "uk":
             return (
@@ -818,7 +825,10 @@ class ReplyService:
 
         matched_dentistry = self._contains_any(normalized, niche_markers["dentistry"])
         matched_clinic = self._contains_any(normalized, niche_markers["clinic"])
-        matched_auto_service = self._contains_any(normalized, niche_markers["auto_service"])
+        matched_auto_service = (
+            self._contains_any(normalized, ["автосерв", "car service", "auto service", "repair shop"])
+            or bool(re.search(r"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ])сто(?![A-Za-zА-Яа-яІіЇїЄєҐґ])", normalized))
+        )
         matched_beauty_salon = self._contains_any(normalized, niche_markers["beauty_salon"])
         if not matched_dentistry and not matched_clinic and not matched_auto_service and not matched_beauty_salon:
             return None
@@ -873,6 +883,10 @@ class ReplyService:
             "питання і нагадує про візити."
             )
         return None
+
+    def get_niche_fit_reply(self, text: str, language: Optional[str] = None) -> Optional[str]:
+        resolved_language = language or self._detect_language(text)
+        return self._get_niche_fit_reply(self._normalize(text), resolved_language)
 
     def _generate_service_ai_reply(
         self,
