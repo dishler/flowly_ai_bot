@@ -50,16 +50,68 @@ class MessageProcessor:
         self.booking_service = booking_service
         self.speech_service = speech_service
 
+    def _normalize_for_booking_keywords(self, text: str) -> str:
+        normalized = " ".join(text.strip().lower().split())
+        return re.sub(r"([а-яіїєґ])\1+", r"\1", normalized)
+
+    def _contains_booking_keyword(self, normalized: str, keyword: str) -> bool:
+        if keyword == "кол":
+            return bool(
+                re.search(
+                    r"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ])кол(?![A-Za-zА-Яа-яІіЇїЄєҐґ])",
+                    normalized,
+                )
+            )
+        return keyword in normalized
+
+    def _contains_booking_action_word(self, normalized: str, word: str) -> bool:
+        if word in {"ок", "ok", "go"}:
+            return bool(
+                re.search(
+                    rf"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ]){re.escape(word)}(?![A-Za-zА-Яа-яІіЇїЄєҐґ])",
+                    normalized,
+                )
+            )
+        return word in normalized
+
     def _looks_like_booking_message(self, text: str) -> bool:
         normalized = text.strip().lower()
+        keyword_normalized = self._normalize_for_booking_keywords(text)
 
         consultation_words = [
             "consultation",
             "call",
             "quick call",
             "дзвінок",
+            "дзвін",
             "консультація",
             "созвон",
+            "зідзвон",
+            "зідзвонитися",
+            "зідзвонитись",
+            "кол",
+        ]
+
+        call_request_words = [
+            "давай",
+            "давайте",
+            "хочу",
+            "можна",
+            "ок",
+            "окей",
+            "потрібен",
+            "потрібно",
+            "запишіть",
+            "записати",
+            "забронювати",
+            "плануємо",
+            "go",
+            "yes",
+            "ok",
+            "okay",
+            "lets",
+            "let's",
+            "want",
         ]
 
         date_words = [
@@ -82,8 +134,16 @@ class MessageProcessor:
             "п’ятниц",
         ]
 
-        has_consultation = any(word in normalized for word in consultation_words)
-        has_date_word = any(word in normalized for word in date_words)
+        has_consultation = any(
+            self._contains_booking_keyword(normalized, word)
+            or self._contains_booking_keyword(keyword_normalized, word)
+            for word in consultation_words
+        )
+        has_call_request = any(
+            self._contains_booking_action_word(keyword_normalized, word)
+            for word in call_request_words
+        )
+        has_date_word = any(word in normalized or word in keyword_normalized for word in date_words)
         has_time = bool(
             re.search(r"\b([01]?\d|2[0-3]):[0-5]\d\b", normalized)
             or re.search(r"\b(10|11|12|13|14|15|16|17|18|19|20|21|22|23)\b", normalized)
@@ -91,6 +151,9 @@ class MessageProcessor:
         )
 
         if has_consultation and (has_date_word or has_time):
+            return True
+
+        if has_consultation and has_call_request:
             return True
 
         return False

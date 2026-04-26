@@ -860,6 +860,34 @@ async def test_soft_call_cta_acceptance_with_typo_starts_booking(processor_facto
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
+async def test_typo_call_request_with_col_starts_booking_time_prompt(processor_factory):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text="гааразд давайте кол"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "waiting_for_time"
+    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_stuck_key_call_request_with_col_starts_booking_time_prompt(processor_factory):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text="давайте коол"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "waiting_for_time"
+    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_booking_pattern_does_not_treat_ok_inside_dzvinok_as_action(processor_factory):
+    processor, _ = processor_factory()
+
+    assert processor._looks_like_booking_message("скільки триває дзвінок?") is False
+
+
 async def test_use_cases_reply_contains_dental_clinic(processor_factory):
     processor, _ = processor_factory()
 
