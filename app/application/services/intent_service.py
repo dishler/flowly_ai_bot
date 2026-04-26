@@ -16,8 +16,12 @@ class IntentService:
                 return True
         return False
 
+    def _normalize_for_matching(self, text: str) -> str:
+        normalized = " ".join(text.strip().lower().split())
+        return re.sub(r"([аеєиіїоуюя])\1+", r"\1", normalized)
+
     def detect_intent(self, text: str) -> IntentType:
-        normalized = text.strip().lower()
+        normalized = self._normalize_for_matching(text)
 
         price_markers = [
             "ціна",
@@ -68,6 +72,10 @@ class IntentService:
             "чим ви займаєтесь",
             "що ви робите",
             "що робите",
+            "що ви пропонуєте",
+            "що пропонуєте",
+            "що можете запропонувати",
+            "яка у вас пропозиція",
             "що робить ваш бот",
             "що робить бот",
             "що вміє бот",

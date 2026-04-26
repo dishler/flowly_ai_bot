@@ -114,6 +114,8 @@ class ReplyService:
 
     def get_contextual_complex_reply(self, user_text: str, language: str) -> str:
         normalized = self._normalize(user_text)
+        if self._is_guarantee_query(normalized):
+            return self._get_guarantee_reply(language)
         if self._is_complex_query(normalized):
             if language == "en":
                 return (
@@ -216,7 +218,8 @@ class ReplyService:
         return reply_text
 
     def _normalize(self, text: str) -> str:
-        return " ".join(text.lower().strip().split())
+        normalized = " ".join(text.lower().strip().split())
+        return re.sub(r"([аеєиіїоуюя])\1+", r"\1", normalized)
 
     def _contains_any(self, text: str, markers: List[str]) -> bool:
         return any(marker in text for marker in markers)
@@ -384,6 +387,10 @@ class ReplyService:
             "чим ви займаєтесь",
             "що ви робите",
             "що робите",
+            "що ви пропонуєте",
+            "що пропонуєте",
+            "що можете запропонувати",
+            "яка у вас пропозиція",
             "як це працює",
             "що входить",
             "що входить у сервіс",
@@ -416,6 +423,7 @@ class ReplyService:
             "добрий день",
             "добрий вечір",
             "вітаю",
+            "хай",
             "hello",
             "hi",
             "hey",
@@ -446,6 +454,48 @@ class ReplyService:
             "how long does launch take",
         ]
         return self._contains_any(normalized, mid_level_markers)
+
+    def _is_implementation_time_query(self, normalized: str) -> bool:
+        implementation_markers = [
+            "скільки часу займає впровадження",
+            "скільки часу займає запуск",
+            "скільки часу впровадження",
+            "скільки триває запуск",
+            "скільки триває впровадження",
+            "час впровадження",
+            "термін впровадження",
+            "терміни впровадження",
+            "як швидко запуск",
+            "як швидко можна запустити",
+            "коли запуск",
+            "how long does launch take",
+            "how quickly can you launch",
+            "implementation timeline",
+            "launch timeline",
+        ]
+        return self._contains_any(normalized, implementation_markers)
+
+    def _is_guarantee_query(self, normalized: str) -> bool:
+        guarantee_markers = [
+            "гарантія",
+            "гарантії",
+            "гарантуєте",
+            "які гарантії",
+            "а гарантії є",
+            "договір",
+            "контракт",
+            "legal",
+            "contract",
+            "guarantee",
+            "warranty",
+        ]
+        return self._contains_any(normalized, guarantee_markers)
+
+    def _get_guarantee_reply(self, language: str) -> str:
+        return (
+            "Гарантовані цифри без аналізу кейсу не обіцяємо. Можемо чесно оцінити ваш процес, "
+            "показати, де бот може зняти ручну роботу і що реально варто автоматизувати першим."
+        )
 
     def _looks_like_question(self, normalized: str, original_text: str) -> bool:
         if "?" in original_text:
@@ -496,6 +546,10 @@ class ReplyService:
             return "basic", "greeting"
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
             return "mid", intent.value
+        if self._is_implementation_time_query(normalized):
+            return "mid", "implementation_time_question"
+        if self._is_guarantee_query(normalized):
+            return "complex", "guarantee_or_legal_question"
         if self._is_complex_query(normalized):
             return "complex", "complex_keywords_detected"
 
@@ -739,6 +793,15 @@ class ReplyService:
             "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
             "і допомагає доводити їх до запису або дзвінка."
         )
+        if normalized and self._is_how_it_works_query(normalized):
+            faq_answer = self._get_faq_answer("Як це працює?", language)
+            if faq_answer:
+                return faq_answer
+            return (
+                "Спочатку розбираємо ваші типові звернення і сценарії в месенджерах. "
+                "Потім налаштовуємо бота, запис і передачу заявок, а після запуску дивимось "
+                "на реальні діалоги та допрацьовуємо відповіді."
+            )
         if normalized and self._is_what_does_bot_do_query(normalized) and language == "uk":
             return standard_description
         if normalized and self._is_service_includes_query(normalized):
@@ -792,6 +855,24 @@ class ReplyService:
         if includes and normalized and self._is_service_includes_query(normalized):
             parts.append("The service usually includes " + ", ".join(includes[:4]) + ".")
         return " ".join(parts)
+
+    def _is_how_it_works_query(self, normalized: str) -> bool:
+        how_it_works_markers = [
+            "як це працює",
+            "як працює сервіс",
+            "як ви працюєте",
+            "як відбувається робота",
+            "як проходить впровадження",
+            "how does it work",
+            "how do you work",
+        ]
+        return self._contains_any(normalized, how_it_works_markers)
+
+    def _get_implementation_time_reply(self, language: str) -> str:
+        faq_answer = self._get_faq_answer("Скільки триває запуск?", language)
+        if faq_answer:
+            return faq_answer
+        return "Типовий запуск займає 7-10 днів, залежно від складності кейсу."
 
     def _get_niche_fit_reply(self, normalized: str, language: str) -> Optional[str]:
         niche_markers = {
@@ -975,6 +1056,12 @@ class ReplyService:
         niche_fit_reply = self._get_niche_fit_reply(normalized, language)
         if niche_fit_reply:
             return niche_fit_reply
+
+        if self._is_implementation_time_query(normalized):
+            return self._get_implementation_time_reply(language)
+
+        if self._is_guarantee_query(normalized):
+            return self._get_guarantee_reply(language)
 
         if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
             history = self.memory_service.get_history(message.sender_id)

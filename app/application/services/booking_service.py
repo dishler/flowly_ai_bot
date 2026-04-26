@@ -125,12 +125,30 @@ class BookingService:
 
     def _is_confirmation_text(self, text: str) -> bool:
         normalized = " ".join(text.strip().lower().split())
+        normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        normalized = re.sub(r"([а-яіїєґ])\1+", r"\1", normalized)
         confirmations = {
             "yes", "y", "yeah", "yep", "sure", "ok", "okay", "confirm",
             "так", "та", "ага", "добре", "ок", "окей", "підтверджую", "підтвердити",
             "підходить", "піідходить", "підходе", "так гуд", "good", "fine",
+            "давай", "давайте", "так давай", "так давайте", "ок давай", "окей давай",
+            "добре давай", "ага давай", "підходить давай",
         }
-        return normalized in confirmations
+        if normalized in confirmations:
+            return True
+
+        words = normalized.split()
+        if not words or len(words) > 4:
+            return False
+
+        confirmation_starts = {
+            "так", "та", "ага", "добре", "ок", "окей", "yes", "ok", "okay", "sure",
+            "підходить", "підходе",
+        }
+        confirmation_actions = {
+            "давай", "давайте", "бронюй", "записуй", "підходить", "підтверджую",
+        }
+        return words[0] in confirmation_starts and any(word in confirmation_actions for word in words[1:])
 
     def _is_confirmation(self, text: str) -> bool:
         return self._is_confirmation_text(text)
@@ -247,6 +265,12 @@ class BookingService:
     def _build_contact_only_retry_reply(self, language: str) -> str:
         return "Дякую, ім’я зафіксував. А для підтвердження залиште, будь ласка, контактний номер або email."
 
+    def _build_booking_status_pending_contact_reply(self, language: str) -> str:
+        return (
+            "Ще ні, фінально підтверджу дзвінок після контакту. "
+            "Залиште, будь ласка, ваше ім’я та номер телефону або email."
+        )
+
     def _build_unrelated_during_booking_reply(self, language: str, state: BookingState) -> str:
         if state == BookingState.WAITING_FOR_CONTACT:
             return (
@@ -259,6 +283,46 @@ class BookingService:
             "і допомагає доводити клієнтів до запису. Для дзвінка підкажіть, будь ласка, "
             "зручний день і час."
         )
+
+    def _looks_like_booking_status_question(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        status_markers = [
+            "поставив дзвінок",
+            "поставили дзвінок",
+            "записав",
+            "записали",
+            "забронював",
+            "забронювали",
+            "підтвердив",
+            "підтвердили",
+            "дзвінок підтверджено",
+            "call booked",
+            "booked",
+            "confirmed",
+        ]
+        return "?" in text and any(marker in normalized for marker in status_markers)
+
+    def looks_like_booking_status_question(self, text: str) -> bool:
+        return self._looks_like_booking_status_question(text)
+
+    def get_confirmed_booking_status_reply(self, sender_id: str, language: str) -> str:
+        completed_booking = self.completed_bookings.get(sender_id) or {}
+        start_dt = None
+        if completed_booking.get("start_dt"):
+            try:
+                start_dt = self._deserialize_pending_start_dt(completed_booking["start_dt"])
+            except Exception:
+                logger.warning(
+                    "confirmed booking start_dt deserialize failed sender_id=%s raw_start_dt=%r",
+                    sender_id,
+                    completed_booking.get("start_dt"),
+                )
+        if start_dt is not None:
+            return (
+                f"Так, дзвінок підтверджено на {self._format_scheduled_time_for_reply(start_dt, language)} 🙌 "
+                "Зв’яжемося з вами у цей час."
+            )
+        return "Так, дзвінок підтверджено 🙌 Зв’яжемося з вами у домовлений час."
 
     def _build_email_confirmed_reply(
         self,
@@ -355,6 +419,27 @@ class BookingService:
             digits = re.sub(r"\D", "", phone)
             if digits:
                 candidate = re.sub(r"[\+\d][\d\-\s\(\)]{6,}\d", " ", candidate)
+
+        explicit_name_match = re.search(
+            r"\b(?:мене\s+звати|моє\s+ім'?я|ім'?я)\s+([A-Za-zА-Яа-яІіЇїЄєҐґ'’`\-\s]{2,60})",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        if explicit_name_match:
+            explicit_candidate = explicit_name_match.group(1)
+            explicit_candidate = re.split(r"[.!?…,\n\r]", explicit_candidate, maxsplit=1)[0]
+            explicit_candidate = re.sub(r"[^A-Za-zА-Яа-яІіЇїЄєҐґ'’`\-\s]", " ", explicit_candidate)
+            explicit_candidate = " ".join(explicit_candidate.split()).strip(" -'’`")
+            explicit_words = [
+                word.strip("-'’`")
+                for word in explicit_candidate.split()[:3]
+                if len(word.strip("-'’`")) >= 2
+            ]
+            if explicit_words:
+                return " ".join(explicit_words)
+
+        if "?" in candidate:
+            return None
 
         candidate = re.sub(
             r"\b(мене\s+звати|моє\s+ім'?я|ім'?я|мій\s+номер|номер|телефон|phone|email|емейл|пошта)\b",
@@ -1155,7 +1240,28 @@ class BookingService:
                     "start_dt": accepted_start_dt.isoformat(),
                 }
 
-            if self._looks_like_unrelated_question_during_booking(message_text):
+            contact_details = self._extract_contact_details(message_text)
+
+            if (
+                not contact_details["has_name"]
+                and not contact_details["has_phone"]
+                and not contact_details["has_email"]
+                and self._looks_like_booking_status_question(message_text)
+            ):
+                return {
+                    "status": "booking_pending_contact_status_question",
+                    "reply_text": self._build_booking_status_pending_contact_reply(language),
+                    "event_created": False,
+                    "requires_contact": True,
+                    "booking_state": BookingState.WAITING_FOR_CONTACT.value,
+                }
+
+            if (
+                not contact_details["has_name"]
+                and not contact_details["has_phone"]
+                and not contact_details["has_email"]
+                and self._looks_like_unrelated_question_during_booking(message_text)
+            ):
                 return {
                     "status": "booking_unrelated_question",
                     "reply_text": self._build_unrelated_during_booking_reply(language, state),
@@ -1164,7 +1270,6 @@ class BookingService:
                     "booking_state": BookingState.WAITING_FOR_CONTACT.value,
                 }
 
-            contact_details = self._extract_contact_details(message_text)
             customer_name = contact_details["customer_name"] or pending.get("customer_name")
             contact_email = contact_details["email"] or pending.get("contact_email")
             contact_phone = contact_details["phone"] or pending.get("contact_phone")

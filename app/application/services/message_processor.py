@@ -532,6 +532,17 @@ class MessageProcessor:
                 intent_value="post_booking_reschedule_prompt",
             )
 
+        if self.booking_service.looks_like_booking_status_question(message.user_message):
+            reply_text = self.booking_service.get_confirmed_booking_status_reply(
+                message.sender_id,
+                language,
+            )
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=reply_text,
+                intent_value="booking_status_confirmed",
+            )
+
         return None
 
     async def _resolve_message_text(self, message: NormalizedMessage) -> str:
@@ -557,10 +568,33 @@ class MessageProcessor:
             return normalized.startswith("Hi!") or normalized.startswith("Hello!")
         return normalized.startswith("Привіт!")
 
-    def _prepend_first_greeting_if_needed(self, sender_id: str, user_text: str, reply_text: str) -> str:
+    def _looks_like_greeting_text(self, user_text: str) -> bool:
+        normalized = " ".join(user_text.strip().lower().split())
+        greeting_markers = [
+            "привіт",
+            "вітаю",
+            "доброго дня",
+            "добрий день",
+            "добрий вечір",
+            "хай",
+            "hello",
+            "hi",
+            "hey",
+        ]
+        return any(marker in normalized for marker in greeting_markers)
+
+    def _prepend_first_greeting_if_needed(
+        self,
+        sender_id: str,
+        user_text: str,
+        reply_text: str,
+        intent: IntentType,
+    ) -> str:
         if not reply_text.strip():
             return reply_text
         if not self._is_first_assistant_reply(sender_id):
+            return reply_text
+        if intent != IntentType.SERVICE_DESCRIPTION and not self._looks_like_greeting_text(user_text):
             return reply_text
 
         language = self.reply_service.detect_user_language(user_text)
@@ -570,11 +604,18 @@ class MessageProcessor:
             return reply_text
         return f"{prefix}{reply_text}"
 
-    def _finalize_general_reply_text(self, sender_id: str, user_text: str, reply_text: str) -> str:
+    def _finalize_general_reply_text(
+        self,
+        sender_id: str,
+        user_text: str,
+        reply_text: str,
+        intent: IntentType,
+    ) -> str:
         finalized = self._prepend_first_greeting_if_needed(
             sender_id=sender_id,
             user_text=user_text,
             reply_text=reply_text,
+            intent=intent,
         )
         return finalized
 
@@ -867,6 +908,7 @@ class MessageProcessor:
                 sender_id=message.sender_id,
                 user_text=message.user_message,
                 reply_text=reply_text,
+                intent=intent,
             )
         logger.info("Reply after guard: %s", reply_text)
 
