@@ -27,9 +27,12 @@ class IntentService:
             "ціна",
             "ціні",
             "що по ціні",
+            "шо по ціні",
             "вартість",
             "скільки коштує",
             "скільки це коштує",
+            "скільки стоїть",
+            "таке скільки стоїть",
             "яка ціна",
             "скільки коштує бот",
             "прайс",
@@ -52,8 +55,13 @@ class IntentService:
             "facebook",
             "фейсбук",
             "whatsapp",
+            "viber",
+            "вайбер",
+            "вайбері",
             "telegram",
             "телеграм",
+            "телега",
+            "телезі",
             "канали",
             "каналы",
             "channels",
@@ -152,18 +160,34 @@ class IntentService:
         ]
 
         booking_markers = [
-            "консультац",
+            "хочу консультац",
+            "потрібна консультац",
+            "потрібна консультация",
+            "давайте консультац",
+            "можна консультац",
             "дзвінок",
-            "запис",
-            "зустріч",
-            "забронювати",
-            "брон",
+            "давайте дзвін",
+            "хочу дзвін",
+            "можемо зідзвон",
+            "можемо созвон",
+            "зідзвонит",
+            "созвон",
+            "хочу обговорити",
+            "давай обговорити",
+            "давайте обговорити",
+            "обговорити кейс",
+            "записатись на консультац",
+            "записатися на консультац",
+            "запишіть мене",
+            "забронювати час",
+            "забронювати дзвінок",
+            "бронювати час",
             "консультация",
             "звонок",
-            "запись",
             "встреча",
             "consultation",
             "call",
+            "book a call",
             "booking",
             "meeting",
         ]
@@ -202,11 +226,56 @@ class IntentService:
             "херня",
         ]
 
-        # Priority: REJECTION > FRUSTRATED > PRICE > CHANNELS > INDUSTRIES > SERVICE_DESCRIPTION > USE_CASES > INTEREST > BOOKING > FALLBACK
+        hesitation_exact = [
+            "може",
+            "подумаю",
+            "я подумаю",
+            "не знаю",
+        ]
+        hesitation_markers = [
+            "ну не знаю",
+            "не знаю чи треба",
+            "не впевнений",
+            "не впевнена",
+            "я поки думаю",
+        ]
+
+        buying_signal_markers = [
+            "може спробуємо",
+            "окей спробуємо",
+            "ок спробуємо",
+            "давайте спробуємо",
+            "давай спробуємо",
+            "ок спробуєм",
+            "окей спробуєм",
+            "спробуєм",
+            "спробуємо",
+            "звучить норм",
+        ]
+
+        start_requirements_markers = [
+            "що потрібно від мене для старту",
+            "що потрібно щоб почати",
+            "що вам треба від мене",
+            "що треба від мене",
+            "шо треба від мене",
+            "шо вам треба від мене",
+            "як почати",
+            "що треба для старту",
+            "що потрібно для старту",
+        ]
+
+        # Priority: REJECTION > FRUSTRATED > HESITATION > BUYING_SIGNAL > START_REQUIREMENTS > PRICE > CHANNELS > INDUSTRIES > SERVICE_DESCRIPTION > USE_CASES > INTEREST > BOOKING > FALLBACK
         if normalized in rejection_markers:
             intent = IntentType.REJECTION
         elif self._contains_any(normalized, frustrated_markers):
             intent = IntentType.FRUSTRATED
+        elif normalized in hesitation_exact or self._contains_any(normalized, hesitation_markers):
+            intent = IntentType.HESITATION
+        elif self._contains_any(normalized, buying_signal_markers):
+            intent = IntentType.BUYING_SIGNAL
+        elif self._contains_any(normalized, start_requirements_markers):
+            intent = IntentType.START_REQUIREMENTS
         elif self._contains_price_marker(normalized, price_markers):
             intent = IntentType.PRICE
         elif self._contains_any(normalized, channel_markers):

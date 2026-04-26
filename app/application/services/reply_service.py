@@ -50,9 +50,9 @@ class ReplyService:
     def _fallback_for_intent(self, intent: IntentType, language: str) -> str:
         if language == "en":
             if intent == IntentType.PRICE:
-                return "Стартуємо від 200$, а точна сума залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
+                return "Зазвичай старт від 200$, далі залежить від каналів, сценарію й інтеграцій. Можу зорієнтувати точніше, якщо напишете, які канали потрібні й що бот має робити."
             if intent == IntentType.CHANNELS:
-                return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
+                return "Працюємо з Instagram, Facebook, Telegram, WhatsApp і Viber. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
             if intent == IntentType.INDUSTRIES:
                 return self._get_industries_reply(language)
             if intent == IntentType.USE_CASES:
@@ -68,9 +68,9 @@ class ReplyService:
             return self._get_unknown_fallback_reply(language)
 
         if intent == IntentType.PRICE:
-            return "Вартість стартує від 200$, але залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
+            return "Зазвичай старт від 200$, далі залежить від каналів, сценарію й інтеграцій. Можу зорієнтувати точніше, якщо напишете, які канали потрібні й що бот має робити."
         if intent == IntentType.CHANNELS:
-            return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
+            return "Працюємо з Instagram, Facebook, Telegram, WhatsApp і Viber. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
         if intent == IntentType.INDUSTRIES:
             return self._get_industries_reply(language)
         if intent == IntentType.USE_CASES:
@@ -253,8 +253,8 @@ class ReplyService:
     def _get_pricing_reply(self, language: str) -> str:
         if language == "uk":
             return (
-                "Вартість стартує від 200$, але залежить від задач, каналів і складності "
-                "налаштування. Можемо коротко обговорити ваш кейс на дзвінку, якщо вам ок."
+                "Зазвичай старт від 200$, далі залежить від каналів, сценарію й інтеграцій. "
+                "Можу зорієнтувати точніше, якщо напишете, які канали потрібні й що бот має робити."
             )
 
         faq_answer = self._get_faq_answer("Скільки це коштує?", language)
@@ -317,7 +317,8 @@ class ReplyService:
         return (
             "Якщо клієнт пише вночі, бот може одразу відповісти, прийняти заявку, "
             "уточнити базові деталі й зібрати контакт. А вже зранку менеджер бачить "
-            "готове звернення і може швидко продовжити діалог."
+            "готове звернення і може швидко продовжити діалог. Якщо хочете, можемо "
+            "коротко розібрати ваш процес і підказати, як це краще автоматизувати."
         )
 
     def _get_interest_signal_reply(self, language: str) -> str:
@@ -360,6 +361,10 @@ class ReplyService:
             "Не вигадуй можливості.\n"
             "Не відповідай російською.\n"
             "Не продавай дзвінок на кожне повідомлення.\n"
+            "Не запускай запис на дзвінок автоматично лише через слова “запис”, “записує”, "
+            "“календар”, “інтеграція”, “CRM”, “майстер”, “прийом”. Спочатку зрозумій: це питання про функцію "
+            "чи реальний намір отримати консультацію.\n"
+            "Якщо користувач просить без дзвінка або пояснити в чаті — допоможи в чаті й не тисни.\n"
             "Якщо питання складне — коротко поясни, що потрібно уточнити, і м’яко запропонуй "
             "розібрати кейс зі спеціалістом."
         )
@@ -568,6 +573,7 @@ class ReplyService:
         markers = [
             "це дорого",
             "дорого",
+            "дорогувато",
             "задорого",
             "expensive",
             "too expensive",
@@ -576,11 +582,10 @@ class ReplyService:
 
     def _get_price_objection_reply(self, language: str) -> str:
         return (
-            "Розумію, бюджет хочеться тримати під контролем — це нормальна реакція, "
-            "не будемо робити вигляд, що гроші ростуть на дереві. Вартість залежить від "
-            "обсягу сценарію, каналів і складності. Найкраще коротко розглянути ваш кейс "
-            "на дзвінку і поспілкуватися: тоді підкажемо мінімальний варіант, з якого є "
-            "сенс почати."
+            "Розумію, не завжди є сенс одразу робити велику систему. Можна почати з "
+            "мінімального сценарію: відповіді на часті питання, збір заявки і передача "
+            "менеджеру. Якщо коротко опишете, де зараз губляться клієнти, підкажу, чи "
+            "є сенс стартувати з базового варіанту."
         )
 
     def _looks_like_question(self, normalized: str, original_text: str) -> bool:
@@ -656,12 +661,12 @@ class ReplyService:
     def _get_greeting_reply(self, language: str) -> str:
         if language == "en":
             return (
-                "Hello! We set up AI bots for Instagram, Facebook, WhatsApp, and Telegram "
+                "Hello! We set up AI bots for Instagram, Facebook, Telegram, WhatsApp, and Viber "
                 "so businesses can reply to clients 24/7 and guide them toward booking. "
                 "If you want, I can briefly explain how this could work in your case."
             )
         return (
-            "Привіт! Ми налаштовуємо AI-ботів для Instagram, Facebook, WhatsApp і Telegram, "
+            "Привіт! Ми налаштовуємо AI-ботів для Instagram, Facebook, Telegram, WhatsApp і Viber, "
             "щоб бізнес відповідав клієнтам 24/7 і доводив їх до запису. Хочете, коротко "
             "підкажу, як це може працювати у вашому випадку?"
         )
@@ -752,6 +757,8 @@ class ReplyService:
                 "Діалог:\n"
                 "- після корисної відповіді став одне коротке питання, яке допомагає зрозуміти потребу\n"
                 "- не кидай у бронювання занадто рано\n"
+                "- не запускай запис автоматично лише через слова “запис”, “записує”, “календар”, “інтеграція”, “CRM”, “майстер”, “прийом” — це може бути питання про функцію\n"
+                "- якщо користувач просить без дзвінка або пояснити тут, відповідай у чаті й не наполягай\n"
                 "- якщо доречно, м’яко запропонуй дзвінок зі спеціалістом, але тільки після корисної відповіді\n\n"
                 "Заборонено:\n"
                 "- вигадувати\n"
@@ -784,6 +791,10 @@ class ReplyService:
             "- if the request is unclear or typo-heavy, briefly rephrase what you understood and ask one clarifying question\n"
             "- if the client has not shown call readiness yet, ask whether implementation is relevant and what business they have\n"
             "- adapt to the client's business context instead of giving abstract text\n\n"
+            "Consultation rules:\n"
+            "- do not start booking just because the user mentioned booking, calendar, integration, CRM, specialist, appointment, or reception\n"
+            "- first decide whether it is a feature question or real consultation intent\n"
+            "- if the user asks to explain here or without a call, answer in chat and do not push\n\n"
             "Optional ending:\n"
             "you may add one short, natural soft CTA."
         )
@@ -893,7 +904,7 @@ class ReplyService:
     ) -> str:
         normalized = self._normalize(user_text or "")
         standard_description = (
-            "Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram. "
+            "Ми налаштовуємо AI-бота для Instagram/Facebook/Telegram/WhatsApp/Viber. "
             "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
             "і допомагає доводити їх до запису або дзвінка. "
             "Актуально розглядаєте впровадження такого бота для свого бізнесу?"
@@ -1159,6 +1170,26 @@ class ReplyService:
 
         if resolved_intent == IntentType.FRUSTRATED:
             return self._get_frustrated_reply(language)
+
+        if resolved_intent == IntentType.HESITATION:
+            return (
+                "Нормально, тут не треба вирішувати одразу. Бот має сенс, якщо є багато "
+                "повторюваних питань, заявки губляться або менеджери довго відповідають. "
+                "Де зараз найбільше ручної переписки?"
+            )
+
+        if resolved_intent == IntentType.BUYING_SIGNAL:
+            return (
+                "Супер, можемо допомогти. Почати можна з простого сценарію: напишіть, будь "
+                "ласка, який у вас бізнес і де зараз найбільше звернень?"
+            )
+
+        if resolved_intent == IntentType.START_REQUIREMENTS:
+            return (
+                "Для старту потрібно зрозуміти 4 речі: де клієнти пишуть, які питання "
+                "повторюються, що треба збирати в заявці і куди передавати заявки. Після "
+                "цього можна скласти перший сценарій бота."
+            )
 
         if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
             return self._get_consultation_reply(language)

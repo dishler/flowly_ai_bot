@@ -25,6 +25,9 @@ _STANDARD_SALES_INTENTS = frozenset(
         IntentType.INTEREST_SIGNAL,
         IntentType.REJECTION,
         IntentType.FRUSTRATED,
+        IntentType.HESITATION,
+        IntentType.BUYING_SIGNAL,
+        IntentType.START_REQUIREMENTS,
         IntentType.BOOKING_REQUEST,
         IntentType.CONSULTATION_INTEREST,
     }
@@ -86,6 +89,9 @@ class MessageProcessor:
             "пояснити без",
             "в тексті",
             "текстом",
+            "поясни тут",
+            "поясніть тут",
+            "давайте тут",
         ]
         if any(marker in keyword_normalized for marker in no_call_markers):
             return False
@@ -97,6 +103,7 @@ class MessageProcessor:
             "дзвінок",
             "дзвін",
             "консультац",
+            "обговорити",
             "созвон",
             "зідзвон",
             "зідзвонитися",
@@ -119,6 +126,7 @@ class MessageProcessor:
             "забронювати",
             "брон",
             "плануємо",
+            "обговоримо",
             "go",
             "yes",
             "ok",
@@ -313,6 +321,8 @@ class MessageProcessor:
             "instagram",
             "facebook",
             "whatsapp",
+            "viber",
+            "вайбер",
             "telegram",
             "вночі",
             "ніч",
@@ -324,6 +334,9 @@ class MessageProcessor:
             "гаранті",
             "crm",
             "інтеграц",
+            "заявки менеджеру",
+            "передає заявки",
+            "передавати заявки",
             "що бот буде питати",
             "що буде питати",
             "ціни на ремонт",
@@ -336,8 +349,348 @@ class MessageProcessor:
             "салон краси",
             "стомат",
             "клінік",
+            "записує",
+            "записувати",
+            "записуєте",
+            "записує до",
+            "запис до",
+            "на прийом",
+            "прийом",
+            "майстр",
+            "календар",
+            "пацієнт",
+            "відповідати пацієнтам",
         ]
         return any(marker in normalized for marker in product_markers)
+
+    def _looks_like_capability_question(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        if "нестандарт" in normalized:
+            return False
+        if "тільки" in normalized and any(
+            marker in normalized
+            for marker in ["instagram", "інстаграм", "інсті", "інсту", "facebook", "фейсбук", "telegram", "телеграм", "whatsapp", "viber", "вайбер"]
+        ):
+            return False
+        has_question_shape = (
+            "?" in text
+            or any(
+                marker in normalized
+                for marker in [
+                    "може",
+                    "можна",
+                    "чи",
+                    "а якщо",
+                    "що буде",
+                    "як буде",
+                    "якщо",
+                    "буде",
+                    "вміє",
+                    "працює",
+                    "працювати",
+                    "підключити",
+                    "підключається",
+                    "передає",
+                ]
+            )
+        )
+        capability_markers = [
+            "instagram",
+            "інстаграм",
+            "інсті",
+            "інсту",
+            "facebook",
+            "фейсбук",
+            "telegram",
+            "телеграм",
+            "телега",
+            "телезі",
+            "whatsapp",
+            "ватсап",
+            "вотсап",
+            "viber",
+            "вайбер",
+            "записує",
+            "записувати",
+            "записуєте",
+            "запис до",
+            "запис на",
+            "до майстра",
+            "майстр",
+            "календар",
+            "прийом",
+            "пацієнт",
+            "відповідати пацієнтам",
+            "відповідати вночі",
+            "відповідати в інстаграм",
+            "заявки менеджеру",
+            "заявки менеджер",
+            "передає заявки",
+            "передавати заявки",
+            "передає менеджеру",
+            "передавати менеджеру",
+            "crm",
+            "сrm",
+            "інтеграц",
+            "питати в клієнта",
+            "що бот буде питати",
+            "що буде питати",
+            "рахувати ціну",
+            "рахувати ремонт",
+            "ціни на ремонт",
+            "точну ціну",
+            "пише незрозуміло",
+            "пише криво",
+            "незрозуміло",
+            "вночі",
+            "уночі",
+            "24/7",
+        ]
+        explicit_booking_markers = [
+            "хочу записатися",
+            "хочу записатись",
+            "запишіть мене",
+            "забронювати час",
+            "давайте дзвінок",
+            "давайте кол",
+            "хочу консультацію",
+            "можемо зідзвон",
+        ]
+        if any(marker in normalized for marker in explicit_booking_markers):
+            return False
+        return has_question_shape and any(marker in normalized for marker in capability_markers)
+
+    def _capability_cta_mode(self, text: str) -> str:
+        normalized = self._normalize_for_conversation_matching(text)
+        soft_markers = [
+            "crm",
+            "сrm",
+            "інтеграц",
+            "календар",
+            "заявки менеджеру",
+            "заявки менеджер",
+            "передає заявки",
+            "передавати заявки",
+            "передає менеджеру",
+            "передавати менеджеру",
+            "вночі",
+            "уночі",
+            "24/7",
+            "пише криво",
+            "пише незрозуміло",
+            "незрозуміло",
+            "рахувати ціну",
+            "рахувати ремонт",
+            "ціни на ремонт",
+            "точну ціну",
+            "у нас",
+            "в нас",
+            "наш",
+            "наші",
+        ]
+        return "soft_cta" if any(marker in normalized for marker in soft_markers) else "no_cta"
+
+    def _append_capability_cta(self, reply_text: str, cta_mode: str) -> str:
+        if cta_mode != "soft_cta":
+            return reply_text
+        if "CRM" in reply_text:
+            cta = "Можемо прикинути під ваш кейс, якщо напишете, яку CRM використовуєте."
+        elif "календар" in reply_text.lower():
+            cta = "Можемо розкласти під ваш процес, щоб не ламати ваші правила запису."
+        elif "Telegram" in reply_text:
+            cta = "Можу підказати під вашу ситуацію, якщо напишете, де зараз найбільше звернень."
+        elif "Viber" in reply_text:
+            cta = "Можемо глянути, як це у вас виглядатиме, якщо Viber справді дає заявки."
+        elif "вночі" in reply_text.lower() or "нечітко" in reply_text.lower():
+            cta = "Можемо глянути, як це у вас виглядатиме в реальних діалогах."
+        else:
+            cta = "Можемо прикинути під ваш кейс і зрозуміти, що варто автоматизувати першим."
+        return (
+            f"{reply_text} {cta}"
+        )
+
+    def _recent_user_question_count(self, sender_id: str) -> int:
+        question_markers = [
+            "?",
+            "що",
+            "як",
+            "чи",
+            "скільки",
+            "може",
+            "можна",
+            "працює",
+            "підключити",
+            "вартість",
+            "ціна",
+        ]
+        count = 0
+        for item in reversed(self.memory_service.get_history(sender_id)[-8:]):
+            if item.startswith("assistant:"):
+                continue
+            text = item.removeprefix("user:").strip().lower()
+            if any(marker in text for marker in question_markers):
+                count += 1
+        return count
+
+    def _get_capability_question_reply(self, text: str) -> tuple[str, str]:
+        normalized = self._normalize_for_conversation_matching(text)
+        cta_mode = self._capability_cta_mode(text)
+        has_niche = any(
+            marker in normalized
+            for marker in ["сто", "автосерв", "салон", "стомат", "клінік", "майстр", "пацієнт"]
+        )
+
+        if any(marker in normalized for marker in ["питати в клієнта", "що бот буде питати", "що буде питати"]):
+            reply_text = (
+                "Зазвичай бот уточнює ім’я, телефон або email, послугу чи запит, бажаний час "
+                "і важливі деталі по ситуації."
+            )
+            if has_niche:
+                reply_text += " Деталі можна адаптувати під вашу нішу: авто, майстра, філію, напрям консультації чи інший процес."
+            return self._append_capability_cta(reply_text, cta_mode), cta_mode
+
+        if any(
+            marker in normalized
+            for marker in [
+                "instagram",
+                "інстаграм",
+                "інсті",
+                "інсту",
+                "facebook",
+                "фейсбук",
+                "telegram",
+                "телеграм",
+                "телега",
+                "телезі",
+                "whatsapp",
+                "ватсап",
+                "вотсап",
+                "viber",
+                "вайбер",
+            ]
+        ):
+            if any(marker in normalized for marker in ["viber", "вайбер"]):
+                reply_text = "Так, Viber можна розглядати як канал для бота, якщо там є ваші звернення."
+            elif any(marker in normalized for marker in ["telegram", "телеграм", "телега", "телезі"]):
+                reply_text = "Так, у Telegram бот може відповідати на повідомлення, збирати заявки й передавати їх команді."
+            elif any(marker in normalized for marker in ["whatsapp", "ватсап", "вотсап"]):
+                reply_text = "Так, WhatsApp можна підключити для відповідей, збору заявок і передачі звернень менеджеру."
+            elif any(marker in normalized for marker in ["facebook", "фейсбук"]):
+                reply_text = "Так, Facebook DM підтримуємо: бот може відповідати клієнтам і збирати заявки з переписки."
+            else:
+                reply_text = "Так, в Instagram бот може відповідати в DM, уточнювати запит і передавати заявку менеджеру."
+            return self._append_capability_cta(reply_text, cta_mode), cta_mode
+
+        if any(marker in normalized for marker in ["календар", "calendar"]):
+            reply_text = (
+                "Так, календар можна підключити. Бот може збирати потрібні дані, перевіряти "
+                "доступність або передавати заявку адміністратору — залежить від того, як у вас "
+                "зараз ведеться запис. Який календар або система запису у вас зараз?"
+            )
+            return self._append_capability_cta(reply_text, "soft_cta"), "soft_cta"
+
+        if any(marker in normalized for marker in ["crm", "сrm", "інтеграц"]):
+            reply_text = (
+                "CRM можна підключити, якщо у неї є API, інтеграція або зрозумілий спосіб "
+                "передачі заявок. Тут залежить від вашого процесу і конкретної CRM."
+            )
+            return self._append_capability_cta(reply_text, "soft_cta"), "soft_cta"
+
+        if any(
+            marker in normalized
+            for marker in [
+                "заявки менеджеру",
+                "заявки менеджер",
+                "передає заявки",
+                "передавати заявки",
+                "передає менеджеру",
+                "передавати менеджеру",
+            ]
+        ):
+            reply_text = (
+                "Так, бот може передавати заявки менеджеру: зібрати контакт, запит, канал "
+                "і потрібні деталі, щоб людина отримала вже структуроване звернення."
+            )
+            return self._append_capability_cta(reply_text, "soft_cta"), "soft_cta"
+
+        if any(marker in normalized for marker in ["пацієнт", "стомат", "клінік", "прийом"]):
+            reply_text = (
+                "Так, може відповідати на типові питання, уточнювати запит, бажаний час "
+                "і контакт та передавати заявку команді. Медичні діагнози або точні "
+                "призначення бот не вигадує."
+            )
+            if any(marker in normalized for marker in ["пацієнт", "стомат", "клінік", "прийом"]):
+                reply_text = (
+                    "Так, може відповідати пацієнтам на типові питання, уточнювати послугу, "
+                    "бажаний час і контакт та передавати заявку адміністратору. Медичні "
+                    "діагнози або точні призначення бот не вигадує."
+                )
+            return self._append_capability_cta(reply_text, cta_mode), cta_mode
+
+        if any(marker in normalized for marker in ["рахувати ціну", "рахувати ремонт", "ціни на ремонт", "точну ціну"]):
+            reply_text = (
+                "Може дати орієнтир за вашими правилами, але Точну вартість ремонту не має "
+                "вигадувати. Якщо потрібна точна оцінка, бот збере деталі по авто і передасть "
+                "заявку менеджеру. Які звернення у вас найчастіші?"
+            )
+            return self._append_capability_cta(reply_text, "soft_cta"), "soft_cta"
+
+        if any(marker in normalized for marker in ["незрозуміло", "пише криво", "пише незрозуміло"]):
+            reply_text = (
+                "Якщо клієнт пише нечітко, бот може нормально перепитати: яку послугу потрібно, "
+                "на який день, який контакт і що саме сталося. Якщо запит складний — краще "
+                "передати його людині, а не вигадувати відповідь."
+            )
+            return self._append_capability_cta(reply_text, "soft_cta"), "soft_cta"
+
+        if any(marker in normalized for marker in ["вночі", "уночі", "24/7"]):
+            reply_text = (
+                "Так, у цьому якраз є сенс: бот може відповідати вночі, збирати заявку і контакт, "
+                "а команда вже обробить її в робочий час. Це допомагає не втрачати людей, які "
+                "пишуть після закриття."
+            )
+            return self._append_capability_cta(reply_text, "soft_cta"), "soft_cta"
+
+        if any(marker in normalized for marker in ["майстр", "записує", "записувати", "запис до", "запис на"]):
+            if has_niche:
+                reply_text = (
+                    "Так, бот може допомагати із записом: уточнювати послугу, бажаний час, "
+                    "майстра або філію і передавати заявку менеджеру чи в календар."
+                )
+            else:
+                reply_text = (
+                    "Так, бот може допомагати із записом: уточнювати потрібну послугу, бажаний "
+                    "час, контакт і передавати заявку команді або в календар."
+                )
+            return self._append_capability_cta(reply_text, cta_mode), cta_mode
+
+        return (
+            "Тут залежить від вашого процесу. Можемо коротко розібрати це на консультації "
+            "й зрозуміти, який сценарій буде найкращий.",
+            "soft_cta",
+        )
+
+    def _build_capability_question_result(self, message: NormalizedMessage) -> Dict[str, Any]:
+        reply_text, cta_mode = self._get_capability_question_reply(message.user_message)
+        if (
+            cta_mode == "no_cta"
+            and self._recent_user_question_count(message.sender_id) >= 2
+            and not self._has_recent_soft_call_cta(message.sender_id)
+        ):
+            cta_mode = "soft_cta"
+            reply_text = self._append_capability_cta(reply_text, cta_mode)
+        routing_category = {
+            "no_cta": "answered_basic",
+            "soft_cta": "consultation_soft_cta",
+            "booking_cta": "consultation_cta",
+        }.get(cta_mode, "answered_basic")
+        return self._build_direct_reply_result(
+            message=message,
+            reply_text=reply_text,
+            intent_value="capability_question",
+            routing_category=routing_category,
+            intent_for_policy=IntentType.GENERAL_QUESTION,
+        )
 
     def _looks_like_buying_signal(self, text: str) -> bool:
         normalized = self._normalize_for_conversation_matching(text)
@@ -346,6 +699,16 @@ class MessageProcessor:
             "потрібний бот",
             "треба бот",
             "хочу бот",
+            "може спробуємо",
+            "окей спробуємо",
+            "ок спробуємо",
+            "давайте спробуємо",
+            "давай спробуємо",
+            "ок спробуєм",
+            "окей спробуєм",
+            "спробуєм",
+            "спробуємо",
+            "звучить норм",
             "цікаве впровадження бота",
             "цікавить впровадження бота",
             "цікавить бот",
@@ -357,8 +720,77 @@ class MessageProcessor:
             "бот в телеграм",
             "бот для telegram",
             "бот в telegram",
+            "бот для телеги",
+            "бот в телезі",
         ]
         return any(marker in normalized for marker in bot_markers)
+
+    def _looks_like_hesitation(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        exact = {"може", "подумаю", "я подумаю"}
+        markers = [
+            "ну не знаю",
+            "не знаю чи треба",
+            "не впевнений",
+            "не впевнена",
+            "я поки думаю",
+        ]
+        return normalized in exact or any(marker in normalized for marker in markers)
+
+    def _looks_like_price_objection(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = ["це дорого", "дорого", "дорогувато", "задорого"]
+        return any(marker in normalized for marker in markers)
+
+    def _looks_like_skepticism(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "черговий чатбот",
+            "звичайний чатбот",
+            "просто чатбот",
+            "шаблони продаєте",
+            "шаблон продаєте",
+            "просто шаблони",
+            "бот буде тупити",
+            "буде тупити",
+            "бот тупитиме",
+            "клієнти бачили робота",
+            "бачили робота",
+            "робот буде відповідати",
+            "чим ви кращі",
+            "чим ви кращ",
+            "чим кращі",
+            "чим краще",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _get_skepticism_reply(self, text: str) -> str:
+        normalized = self._normalize_for_conversation_matching(text)
+        if any(marker in normalized for marker in ["шаблон", "шаблони"]):
+            return (
+                "Ні, ідея не в тому, щоб продати набір шаблонів. Ми збираємо сценарій під ваші "
+                "типові звернення, тон спілкування і правила передачі заявок."
+            )
+        if any(marker in normalized for marker in ["тупить", "тупити", "тупитиме"]):
+            return (
+                "Це реальний ризик, тому бот не має вигадувати відповіді. Для складних або "
+                "нечітких запитів він краще уточнює деталі або передає діалог людині."
+            )
+        if "робот" in normalized:
+            return (
+                "Розумію. Нормальний бот має звучати просто й корисно, а не як автомат із заготовками. "
+                "Плюс складні звернення можна одразу переводити на менеджера."
+            )
+        if "чим" in normalized and ("кращ" in normalized or "краще" in normalized):
+            return (
+                "Наша різниця не в красивій обгортці, а в сценарії під ваш процес: що бот має "
+                "питати, коли передавати менеджеру і як не губити заявки. Тобто робимо не просто "
+                "відповіді, а нормальну логіку продажу в месенджерах."
+            )
+        return (
+            "Різниця в тому, що це не просто кнопковий чатбот. Ми робимо AI-асистента під ваш процес: "
+            "він розуміє запит, уточнює деталі й передає нормальну заявку менеджеру."
+        )
 
     def _wants_more_info_before_booking(self, text: str) -> bool:
         normalized = self._normalize_for_conversation_matching(text)
@@ -509,10 +941,20 @@ class MessageProcessor:
             "окей": "Дякую, зафіксував.",
             "добре": "Добре, дякую.",
             "давай": "Добре, підкажіть, будь ласка, що саме вам зручно обговорити?",
+            "давайте": "Добре, тоді почнемо з контексту: який у вас бізнес і де зараз найбільше звернень?",
+            "так давай": "Добре, тоді почнемо з контексту: який у вас бізнес і де зараз найбільше звернень?",
+            "так давайте": "Добре, тоді почнемо з контексту: який у вас бізнес і де зараз найбільше звернень?",
             "ага": "Зрозумів. Можу коротко зорієнтувати по суті: як працює бот, для яких бізнесів підходить або скільки коштує.",
             "актуально": "Супер. Для якого бізнесу розглядаєте бота і що хочете автоматизувати в першу чергу?",
             "можливо": "Ок, можна рухатись без поспіху. Найпростіше почати з контексту: який у вас бізнес і де зараз найбільше звернень?",
+            "ну може": "Ок, без тиску. Можемо спершу коротко зрозуміти ваш процес і підказати, чи є сенс автоматизувати саме зараз.",
             "ну це таке": "Розумію, звучить поки не дуже переконливо. Можу пояснити простіше на прикладі вашого бізнесу, якщо напишете сферу.",
+            "не впевнений": "Нормально, тут не треба вирішувати з першого повідомлення. Можемо спершу зрозуміти, чи є у вас достатньо повторюваних звернень, які реально варто автоматизувати.",
+            "не впевнена": "Нормально, тут не треба вирішувати з першого повідомлення. Можемо спершу зрозуміти, чи є у вас достатньо повторюваних звернень, які реально варто автоматизувати.",
+            "не знаю чи треба": "Тоді найпростіше перевірити від потреби: якщо клієнти часто пишуть одне й те саме або заявки губляться, бот може мати сенс. Де зараз найбільше ручної переписки?",
+            "не знаю": "Ок, без поспіху. Можемо почати з простого: де зараз найбільше повідомлень від клієнтів і що найчастіше питають?",
+            "поясни простіше": "По суті: бот відповідає замість менеджера і не дає губити заявки. Він може прийняти звернення, уточнити деталі й передати людині вже готовий запит.",
+            "поясніть простіше": "По суті: бот відповідає замість менеджера і не дає губити заявки. Він може прийняти звернення, уточнити деталі й передати людині вже готовий запит.",
             "можливо потім": soft_followup_reply,
             "можливо пізніше": soft_followup_reply,
             "не зараз": soft_followup_reply,
@@ -593,6 +1035,8 @@ class MessageProcessor:
             "на дзвінку і поспілкуватися",
             "зі спеціалістом на дзвінку",
             "розібрати ваш процес зі спеціалістом",
+            "коротко розібрати ваш процес",
+            "підказати, як це краще автоматизувати",
         ]
         for item in reversed(previous_items[-4:]):
             if not item.startswith("assistant:"):
@@ -664,6 +1108,9 @@ class MessageProcessor:
             "не хочу консультацію",
             "в тексті",
             "текстом",
+            "поясни тут",
+            "поясніть тут",
+            "давайте тут",
             "спочатку хочу більше",
             "спершу зрозуміти",
             "спочатку зрозуміти",
@@ -677,7 +1124,7 @@ class MessageProcessor:
             "Так, звісно, можна без дзвінка. Якщо коротко: бот бере типові повідомлення "
             "в месенджерах, відповідає клієнтам, уточнює потрібні деталі й передає вже "
             "готову заявку або веде до запису. Щоб пояснити точніше, який у вас бізнес "
-            "і де зараз найбільше звернень: Instagram, Telegram чи WhatsApp?"
+            "і де зараз найбільше звернень: Instagram, Telegram, WhatsApp чи Viber?"
         )
 
     def _has_recent_intro_offer(self, sender_id: str) -> bool:
@@ -715,7 +1162,11 @@ class MessageProcessor:
             if not item.startswith("assistant:"):
                 continue
             normalized = item.lower()
-            if "вартість стартує" in normalized or "pricing starts" in normalized:
+            if (
+                "вартість стартує" in normalized
+                or "старт від 200" in normalized
+                or "pricing starts" in normalized
+            ):
                 return True
         return False
 
@@ -1010,6 +1461,9 @@ class MessageProcessor:
                         booking_result=booking_result,
                     )
 
+            if self._looks_like_capability_question(message.user_message):
+                return self._build_capability_question_result(message)
+
             if (
                 booking_state == BookingState.WAITING_FOR_TIME
                 and self._looks_like_product_question_during_booking(message.user_message)
@@ -1182,6 +1636,9 @@ class MessageProcessor:
                 intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
+        if self._looks_like_capability_question(message.user_message):
+            return self._build_capability_question_result(message)
+
         if (
             self._has_recent_soft_call_cta(message.sender_id)
             and self._looks_like_interest_booking_acceptance(message.user_message)
@@ -1241,10 +1698,10 @@ class MessageProcessor:
             language = self.reply_service.detect_user_language(message.user_message)
             return self._build_direct_reply_result(
                 message=message,
-                reply_text=self.reply_service.get_buying_signal_reply(language),
+                reply_text=self.reply_service.generate_reply(message, intent=IntentType.BUYING_SIGNAL),
                 intent_value="buying_signal",
-                routing_category="consultation_cta",
-                intent_for_policy=IntentType.GENERAL_QUESTION,
+                routing_category="consultation_soft_cta",
+                intent_for_policy=IntentType.BUYING_SIGNAL,
             )
 
         if (
@@ -1262,6 +1719,25 @@ class MessageProcessor:
                 intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
+        early_intent = self.intent_service.detect_intent(message.user_message)
+        if early_intent in {IntentType.HESITATION, IntentType.START_REQUIREMENTS}:
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=early_intent),
+                intent_value=early_intent.value,
+                routing_category="answered_basic",
+                intent_for_policy=early_intent,
+            )
+
+        if self._looks_like_price_objection(message.user_message):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=IntentType.GENERAL_QUESTION),
+                intent_value=IntentType.GENERAL_QUESTION.value,
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
         contextual_short_reply = self._get_contextual_short_reply(message.user_message)
         if contextual_short_reply:
             return self._build_direct_reply_result(
@@ -1270,7 +1746,34 @@ class MessageProcessor:
                 intent_value="contextual_short_reply",
             )
 
+        if self._looks_like_skepticism(message.user_message):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_skepticism_reply(message.user_message),
+                intent_value="skepticism",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
         current_intent = self.intent_service.detect_intent(message.user_message)
+        if current_intent in {
+            IntentType.HESITATION,
+            IntentType.BUYING_SIGNAL,
+            IntentType.START_REQUIREMENTS,
+        }:
+            routing_category = (
+                "consultation_soft_cta"
+                if current_intent == IntentType.BUYING_SIGNAL
+                else "answered_basic"
+            )
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=current_intent),
+                intent_value=current_intent.value,
+                routing_category=routing_category,
+                intent_for_policy=current_intent,
+            )
+
         if current_intent in {
             IntentType.PRICE,
             IntentType.CHANNELS,
@@ -1288,6 +1791,7 @@ class MessageProcessor:
         if (
             self._has_recent_price_reply(message.sender_id)
             and self._looks_like_business_details(message.user_message)
+            and not self._looks_like_hesitation(message.user_message)
             and not self._looks_like_booking_message(message.user_message)
             and not self._looks_like_reschedule_request(message.user_message)
             and not self._looks_like_cancel_request(message.user_message)
