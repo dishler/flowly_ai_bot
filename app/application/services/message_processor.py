@@ -317,6 +317,12 @@ class MessageProcessor:
             "рахувати ремонт",
             "це дорого",
             "дорого",
+            "сто",
+            "автосерв",
+            "салон",
+            "салон краси",
+            "стомат",
+            "клінік",
         ]
         return any(marker in normalized for marker in product_markers)
 
@@ -353,8 +359,27 @@ class MessageProcessor:
             "цікавить спочатку",
             "хай",
             "привіт",
+            "як це",
+            "як працюват",
+            "чи підійде",
+            "для нас",
+            "?",
         ]
         return any(marker in normalized for marker in markers)
+
+    def _has_recent_interest_qualification(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if "актуально розглядаєте впровадження" in normalized:
+                return True
+        return False
+
+    def _get_interest_acceptance_followup_reply(self) -> str:
+        return "Супер. Для якого бізнесу розглядаєте бота і що хочете автоматизувати в першу чергу?"
 
     def _looks_like_booking_pause_or_postpone(self, text: str) -> bool:
         normalized = self._normalize_for_conversation_matching(text)
@@ -915,6 +940,19 @@ class MessageProcessor:
 
             if (
                 booking_state == BookingState.WAITING_FOR_TIME
+                and self.intent_service.detect_intent(message.user_message) == IntentType.INTEREST_SIGNAL
+            ):
+                reply_text = self.reply_service.generate_reply(message, intent=IntentType.INTEREST_SIGNAL)
+                return self._build_direct_reply_result(
+                    message=message,
+                    reply_text=reply_text,
+                    intent_value="interest_signal",
+                    routing_category="answered_basic",
+                    intent_for_policy=IntentType.INTEREST_SIGNAL,
+                )
+
+            if (
+                booking_state == BookingState.WAITING_FOR_TIME
                 and self._looks_like_availability_question(message.user_message)
             ):
                 booking_result = self.booking_service.handle_availability_question(
@@ -1060,6 +1098,30 @@ class MessageProcessor:
                 reply_text=booking_result["reply_text"],
                 intent_value="booking_request",
                 booking_result=booking_result,
+            )
+
+        if (
+            self._has_recent_interest_qualification(message.sender_id)
+            and self.intent_service.detect_intent(message.user_message) == IntentType.INTEREST_SIGNAL
+        ):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_interest_acceptance_followup_reply(),
+                intent_value="interest_followup",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
+        if (
+            self._has_recent_interest_qualification(message.sender_id)
+            and self._looks_like_interest_booking_acceptance(message.user_message)
+        ):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_interest_acceptance_followup_reply(),
+                intent_value="interest_followup",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
         if self._looks_like_buying_signal(message.user_message):

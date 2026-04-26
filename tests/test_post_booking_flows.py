@@ -483,7 +483,7 @@ async def test_active_waiting_for_time_stays_in_booking_for_unrelated_question(p
     assert start_result["booking_result"]["booking_state"] == "WAITING_FOR_TIME"
     assert price_result["intent"] == "booking_product_question"
     assert "Вартість стартує від 200$" in price_result["reply_text"]
-    assert "Для дзвінка підкажіть" in price_result["reply_text"]
+    assert "Для дзвінка підкажіть" not in price_result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1107,11 +1107,8 @@ async def test_service_question_what_does_your_bot_do_returns_explanation_not_ct
 
     assert result["intent"] == "service_description"
     assert result["routing_category"] == "answered_basic"
-    assert result["reply_text"] == (
-        "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram. "
-        "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
-        "і допомагає доводити їх до запису або дзвінка."
-    )
+    assert "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram." in result["reply_text"]
+    assert "Актуально розглядаєте впровадження" in result["reply_text"]
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
 
 
@@ -1215,7 +1212,7 @@ async def test_interest_signal_returns_soft_call_cta(processor_factory):
     assert result["intent"] == "interest_signal"
     assert result["routing_category"] == "consultation_cta"
     assert not result["reply_text"].startswith("Привіт!")
-    assert "Зручно буде на дзвінок?" in result["reply_text"]
+    assert "Актуально розглядаєте впровадження" in result["reply_text"]
     assert result["booking_result"] is None
 
 
@@ -1246,19 +1243,36 @@ async def test_interest_signal_does_not_use_generic_cta(processor_factory):
 
     assert result["intent"] == "interest_signal"
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
-    assert "Можемо коротко обговорити ваш процес" in result["reply_text"]
+    assert "Актуально розглядаєте впровадження" in result["reply_text"]
 
 
-async def test_interest_signal_acceptance_starts_booking_time_prompt(processor_factory):
+async def test_interest_signal_acceptance_asks_for_business_context(processor_factory):
     processor, booking_service = processor_factory()
 
     await processor.process(_message(text="гаразд цікаво"))
     result = await processor.process(_message(text="так"))
 
-    assert result["intent"] == "booking_request"
-    assert result["booking_result"]["status"] == "waiting_for_time"
-    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
-    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+    assert result["intent"] == "interest_followup"
+    assert "Для якого бізнесу" in result["reply_text"]
+    assert result["booking_result"] is None
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_service_intro_then_interest_asks_business_context_not_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    intro = await processor.process(_message(text="привіт, що ви робите?"))
+    interest = await processor.process(_message(text="Цікаво"))
+    niche = await processor.process(_message(text="а в мене салон краси, як це працюватиме для нас?"))
+
+    assert "Актуально розглядаєте впровадження" in intro["reply_text"]
+    assert interest["intent"] == "interest_followup"
+    assert "Для якого бізнесу" in interest["reply_text"]
+    assert interest["booking_result"] is None
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+    assert niche["intent"] == "niche_fit"
+    assert "для салону краси" in niche["reply_text"]
+    assert "Підкажіть, будь ласка, точний день і час" not in niche["reply_text"]
 
 
 async def test_greeting_followup_with_auto_service_context_gets_niche_reply(processor_factory):
@@ -1468,11 +1482,8 @@ async def test_manual_negative_dialogue_has_no_forbidden_generic_cta(processor_f
         result = await processor.process(_message(text=text))
         transcript.append((text, result["reply_text"]))
 
-    assert transcript[0][1] == (
-        "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram. "
-        "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
-        "і допомагає доводити їх до запису або дзвінка."
-    )
+    assert "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram." in transcript[0][1]
+    assert "Актуально розглядаєте впровадження" in transcript[0][1]
     assert "Найкраще бот підходить для сервісних бізнесів" in transcript[1][1]
     assert transcript[2][1].startswith("Зрозумів, дякую.")
     assert transcript[3][1] == "Добре, зрозумів."
