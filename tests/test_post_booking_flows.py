@@ -1539,3 +1539,30 @@ async def test_branch_routing_reply_does_not_use_forbidden_setup_phrase(processo
     assert "логікою маршрутизації" in result["reply_text"]
     assert "Так, це можна налаштувати" not in result["reply_text"]
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_price_and_call_typos_after_niche_reply_do_not_fallback(processor_factory):
+    processor, booking_service = processor_factory()
+
+    niche = await processor.process(_message(text="для стоматології як це працює?"))
+    price = await processor.process(_message(text="що по ціні?"))
+    accepted = await processor.process(_message(text="так давай"))
+    typo_call = await processor.process(_message(text="можемо зідзвонитис"))
+    call = await processor.process(_message(text="давай кол"))
+    availability = await processor.process(_message(text="завтра коли вільно?"))
+
+    assert "для стоматологій" in niche["reply_text"]
+    assert price["intent"] == "price"
+    assert "Вартість стартує від 200$" in price["reply_text"]
+    assert accepted["intent"] == "booking_request"
+    assert accepted["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert typo_call["intent"] == "booking_flow"
+    assert "конкретний день і час" in typo_call["reply_text"]
+    assert call["intent"] == "booking_flow"
+    assert "Підкажіть" in call["reply_text"] or "конкретний день і час" in call["reply_text"]
+    assert availability["intent"] == "booking_availability_question"
+    assert "варіант" in availability["reply_text"]
+    assert "завтра" in availability["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+    for result in [price, accepted, typo_call, call, availability]:
+        assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
