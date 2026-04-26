@@ -17,6 +17,9 @@ from app.application.services.message_processor import MessageProcessor
 from app.application.services.reply_service import ReplyService
 
 
+FORBIDDEN_GENERIC_CTA = "Так, це можна налаштувати, але краще спершу зрозуміти ваш процес"
+
+
 class DummyDedupService:
     def __init__(self) -> None:
         self.processed = set()
@@ -72,7 +75,7 @@ class RecordingAIService:
         )
         return {
             "used_ai": True,
-            "reply_text": "AI fallback reply: коротко поясню і запропоную дзвінок.",
+            "reply_text": "AI fallback reply: уточніть, будь ласка, що саме потрібно.",
         }
 
 
@@ -755,11 +758,11 @@ async def test_service_question_for_whom(processor_factory):
 
     result = await processor.process(_message(text="А для кого це?"))
 
-    assert result["intent"] == "service_description"
+    assert result["intent"] == "industries"
     assert result["routing_category"] == "answered_basic"
     assert "Для кого це?" not in result["reply_text"]
-    assert "Так, це можна налаштувати" not in result["reply_text"]
-    assert "сервісним бізнесам" in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+    assert "сервісних бізнесів" in result["reply_text"]
 
 
 async def test_service_question_what_does_bot_do(processor_factory):
@@ -769,7 +772,7 @@ async def test_service_question_what_does_bot_do(processor_factory):
 
     assert result["intent"] == "service_description"
     assert result["routing_category"] == "answered_basic"
-    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
     assert ("працює" in result["reply_text"] or "AI-бот" in result["reply_text"] or "Як це" in result["reply_text"])
 
 
@@ -781,11 +784,11 @@ async def test_service_question_what_does_your_bot_do_returns_explanation_not_ct
     assert result["intent"] == "service_description"
     assert result["routing_category"] == "answered_basic"
     assert result["reply_text"] == (
-        "Привіт! Це AI-бот, який відповідає на повідомлення в Instagram/Facebook, "
-        "закриває типові питання і допомагає довести клієнта до запису або дзвінка. "
-        "Тобто замість ручних відповідей бот робить це автоматично."
+        "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram. "
+        "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
+        "і допомагає доводити їх до запису або дзвінка."
     )
-    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
 
 
 async def test_service_question_what_is_included(processor_factory):
@@ -795,7 +798,7 @@ async def test_service_question_what_is_included(processor_factory):
 
     assert result["intent"] == "service_description"
     assert result["routing_category"] == "answered_basic"
-    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
     assert ("входить" in result["reply_text"] or "аудит" in result["reply_text"])
 
 
@@ -816,7 +819,7 @@ async def test_interest_signal_does_not_use_generic_cta(processor_factory):
     result = await processor.process(_message(text="звучить цікаво"))
 
     assert result["intent"] == "interest_signal"
-    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
     assert "Можемо коротко обговорити ваш процес" in result["reply_text"]
 
 
@@ -840,7 +843,7 @@ async def test_greeting_followup_with_auto_service_context_gets_niche_reply(proc
 
     assert result["intent"] == "business_context_followup"
     assert "для автосервісу" in result["reply_text"]
-    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
@@ -893,6 +896,120 @@ async def test_unknown_question_uses_ai_fallback(processor_factory):
     result = await processor.process(_message(text="Чи можна зробити щось нестандартне під мою команду?"))
 
     assert result["intent"] == "general_question"
-    assert result["reply_text"].endswith("AI fallback reply: коротко поясню і запропоную дзвінок.")
+    assert result["reply_text"].endswith("AI fallback reply: уточніть, будь ласка, що саме потрібно.")
     assert ai_service.calls
     assert "Ти менеджер Flowly Agency" in ai_service.calls[0]["system_instruction"]
+
+
+async def test_industries_reply_contains_service_businesses_and_auto_service(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="з якими напрямками працюєте?"))
+
+    assert result["intent"] == "industries"
+    assert "сервісних бізнесів" in result["reply_text"]
+    assert "СТО" in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_rejection_does_not_offer_call(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="ні"))
+
+    assert result["intent"] == "rejection"
+    assert result["reply_text"] == (
+        "Зрозумів, дякую. Якщо пізніше буде актуально автоматизувати відповіді "
+        "в месенджерах — можете просто написати сюди."
+    )
+    assert "дзвінок" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_second_rejection_is_short_and_does_not_repeat_cta(processor_factory):
+    processor, _ = processor_factory()
+
+    await processor.process(_message(text="ні"))
+    result = await processor.process(_message(text="ні"))
+
+    assert result["intent"] == "rejection"
+    assert result["reply_text"] == "Добре, зрозумів."
+    assert "дзвінок" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_frustrated_user_gets_recovery_reply(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="ти дебіл?"))
+
+    assert result["intent"] == "frustrated"
+    assert result["reply_text"] == (
+        "Розумію, відповідь була не зовсім по суті. Можу коротко пояснити конкретно: "
+        "що робить бот, для яких бізнесів підходить або скільки коштує."
+    )
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "я не зрозумів останню відповідь",
+        "ні",
+        "з якими напрямками працюєте?",
+        "ти дебіл?",
+        "А є якісь кейси?",
+    ],
+)
+async def test_forbidden_generic_cta_is_not_returned_for_key_routes(processor_factory, text):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text=text))
+
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_manual_negative_dialogue_has_no_forbidden_generic_cta(processor_factory):
+    processor, _ = processor_factory()
+    transcript = []
+
+    for text in [
+        "чим ви займаєтесь?",
+        "з якими напрямками працюєте?",
+        "ні",
+        "ні",
+        "ти дебіл?",
+    ]:
+        result = await processor.process(_message(text=text))
+        transcript.append((text, result["reply_text"]))
+
+    assert transcript[0][1] == (
+        "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram. "
+        "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
+        "і допомагає доводити їх до запису або дзвінка."
+    )
+    assert "Найкраще бот підходить для сервісних бізнесів" in transcript[1][1]
+    assert transcript[2][1].startswith("Зрозумів, дякую.")
+    assert transcript[3][1] == "Добре, зрозумів."
+    assert transcript[4][1].startswith("Розумію, відповідь була не зовсім по суті.")
+    for _, reply in transcript:
+        assert FORBIDDEN_GENERIC_CTA not in reply
+
+
+async def test_price_still_returns_from_200(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="Скільки це коштує?"))
+
+    assert result["intent"] == "price"
+    assert "Вартість стартує від 200$" in result["reply_text"]
+
+
+async def test_russian_input_does_not_produce_russian_output(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="сколько стоит?"))
+
+    assert result["intent"] == "price"
+    assert "сколько" not in result["reply_text"].lower()
+    assert "стоит" not in result["reply_text"].lower()

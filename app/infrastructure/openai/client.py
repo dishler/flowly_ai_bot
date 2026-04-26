@@ -78,6 +78,8 @@ class OpenAIClient:
             "- Do not start replies with filler like 'Yes —', 'Sure —', or similar unless truly necessary.\n"
             "- Do not invent calendar slots.\n"
             "- Do not say booking is confirmed unless an event was actually created.\n"
+            "- Never use a generic 'this can be configured, let's understand your process first' CTA as a fallback.\n"
+            "- Do not push a call in every message; ask a clarifying question if you are unsure.\n"
             "- If date or time is unclear, ask one short clarification question.\n\n"
 
             "Behavior:\n"

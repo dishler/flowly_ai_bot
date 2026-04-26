@@ -1,4 +1,5 @@
 import logging
+import re
 
 from app.domain.enums import IntentType
 
@@ -6,6 +7,15 @@ logger = logging.getLogger(__name__)
 
 
 class IntentService:
+    def _contains_any(self, normalized: str, markers: list[str]) -> bool:
+        return any(marker in normalized for marker in markers)
+
+    def _contains_price_marker(self, normalized: str, markers: list[str]) -> bool:
+        for marker in markers:
+            if re.search(rf"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ]){re.escape(marker)}(?![A-Za-zА-Яа-яІіЇїЄєҐґ])", normalized):
+                return True
+        return False
+
     def detect_intent(self, text: str) -> IntentType:
         normalized = text.strip().lower()
 
@@ -94,6 +104,20 @@ class IntentService:
             "what does the service include",
         ]
 
+        industry_markers = [
+            "з якими напрямками працюєте",
+            "з якими бізнесами працюєте",
+            "для яких сфер",
+            "для яких ніш",
+            "кому це підходить",
+            "для кого це",
+            "які напрями",
+            "які напрямки",
+            "які ніші",
+            "кому підходить бот",
+            "з якими напрямами",
+        ]
+
         use_case_markers = [
             "а є якісь кейси",
             "є якісь кейси",
@@ -137,18 +161,44 @@ class IntentService:
             "хм, цікаво",
         ]
 
-        # Priority: PRICE > CHANNELS > USE_CASES > SERVICE_DESCRIPTION > INTEREST > BOOKING > FALLBACK
-        if any(marker in normalized for marker in price_markers):
+        rejection_markers = [
+            "ні",
+            "не цікаво",
+            "не треба",
+            "ні дякую",
+            "ні, дякую",
+            "поки ні",
+            "не актуально",
+        ]
+
+        frustrated_markers = [
+            "ти дебіл",
+            "що за хуйня",
+            "ідіот",
+            "идиот",
+            "дебіл",
+            "дебил",
+            "хуйня",
+        ]
+
+        # Priority: REJECTION > FRUSTRATED > PRICE > CHANNELS > INDUSTRIES > SERVICE_DESCRIPTION > USE_CASES > INTEREST > BOOKING > FALLBACK
+        if normalized in rejection_markers:
+            intent = IntentType.REJECTION
+        elif self._contains_any(normalized, frustrated_markers):
+            intent = IntentType.FRUSTRATED
+        elif self._contains_price_marker(normalized, price_markers):
             intent = IntentType.PRICE
-        elif any(marker in normalized for marker in channel_markers):
+        elif self._contains_any(normalized, channel_markers):
             intent = IntentType.CHANNELS
-        elif any(marker in normalized for marker in use_case_markers):
-            intent = IntentType.USE_CASES
-        elif any(marker in normalized for marker in service_markers):
+        elif self._contains_any(normalized, industry_markers):
+            intent = IntentType.INDUSTRIES
+        elif self._contains_any(normalized, service_markers):
             intent = IntentType.SERVICE_DESCRIPTION
-        elif any(marker in normalized for marker in interest_markers):
+        elif self._contains_any(normalized, use_case_markers):
+            intent = IntentType.USE_CASES
+        elif self._contains_any(normalized, interest_markers):
             intent = IntentType.INTEREST_SIGNAL
-        elif any(marker in normalized for marker in booking_markers):
+        elif self._contains_any(normalized, booking_markers):
             intent = IntentType.BOOKING_REQUEST
         else:
             intent = IntentType.GENERAL_QUESTION

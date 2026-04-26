@@ -20,8 +20,11 @@ _STANDARD_SALES_INTENTS = frozenset(
         IntentType.PRICE,
         IntentType.CHANNELS,
         IntentType.SERVICE_DESCRIPTION,
+        IntentType.INDUSTRIES,
         IntentType.USE_CASES,
         IntentType.INTEREST_SIGNAL,
+        IntentType.REJECTION,
+        IntentType.FRUSTRATED,
         IntentType.BOOKING_REQUEST,
         IntentType.CONSULTATION_INTEREST,
     }
@@ -289,6 +292,17 @@ class MessageProcessor:
                 continue
             normalized = item.lower()
             if any(marker in normalized for marker in markers):
+                return True
+        return False
+
+    def _has_recent_rejection_reply(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if "якщо пізніше буде актуально" in normalized or "добре, зрозумів" in normalized:
                 return True
         return False
 
@@ -654,6 +668,29 @@ class MessageProcessor:
         intent = self.intent_service.detect_intent(message.user_message)
         intent_value = intent.value
         logger.info("Intent detected: %s", intent)
+
+        if intent == IntentType.REJECTION:
+            language = self.reply_service.detect_user_language(message.user_message)
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.get_rejection_reply(
+                    language,
+                    repeated=self._has_recent_rejection_reply(message.sender_id),
+                ),
+                intent_value=intent_value,
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.REJECTION,
+            )
+
+        if intent == IntentType.FRUSTRATED:
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=intent),
+                intent_value=intent_value,
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.FRUSTRATED,
+            )
+
         history = self.memory_service.get_history(message.sender_id)
         question_level, question_reason = self.reply_service.classify_question_level(
             user_text=message.user_message,

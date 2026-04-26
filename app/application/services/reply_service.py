@@ -53,30 +53,43 @@ class ReplyService:
                 return "Стартуємо від 200$, а точна сума залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
             if intent == IntentType.CHANNELS:
                 return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
+            if intent == IntentType.INDUSTRIES:
+                return self._get_industries_reply(language)
             if intent == IntentType.USE_CASES:
                 return self._get_use_cases_reply(language)
             if intent == IntentType.SERVICE_DESCRIPTION:
                 return self._get_service_description_fallback_reply(language)
             if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
                 return "Так, можемо коротко обговорити. На дзвінку швидко розберемо процес і підкажемо, що варто автоматизувати першим."
-            return "Ми налаштовуємо бота, який відповідає в месенджерах, уточнює деталі й веде клієнта до запису. Можемо коротко під ваш кейс підказати, якщо вам ок."
+            if intent == IntentType.REJECTION:
+                return self._get_rejection_reply(language)
+            if intent == IntentType.FRUSTRATED:
+                return self._get_frustrated_reply(language)
+            return self._get_unknown_fallback_reply(language)
 
         if intent == IntentType.PRICE:
             return "Вартість стартує від 200$, але залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
         if intent == IntentType.CHANNELS:
             return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
+        if intent == IntentType.INDUSTRIES:
+            return self._get_industries_reply(language)
         if intent == IntentType.USE_CASES:
             return self._get_use_cases_reply(language)
         if intent == IntentType.SERVICE_DESCRIPTION:
             return self._get_service_description_fallback_reply(language)
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
             return "Так, можемо коротко обговорити. На дзвінку швидко розберемо процес і підкажемо, що варто автоматизувати першим."
-        return "Ми налаштовуємо бота, який відповідає в месенджерах, уточнює деталі й веде клієнта до запису. Можемо коротко під ваш кейс підказати, якщо вам ок."
+        if intent == IntentType.REJECTION:
+            return self._get_rejection_reply(language)
+        if intent == IntentType.FRUSTRATED:
+            return self._get_frustrated_reply(language)
+        return self._get_unknown_fallback_reply(language)
 
     def get_escalation_reply(self, language: str) -> str:
-        if language == "en":
-            return "Так, це можна налаштувати, але краще спершу зрозуміти ваш процес. Можемо коротко обговорити на дзвінку, якщо вам ок."
-        return "Так, це можна налаштувати, але краще спершу зрозуміти ваш процес. Можемо коротко обговорити на дзвінку, якщо вам ок."
+        return (
+            "Тут краще коротко уточнити деталі, щоб не відповісти повз ваш запит. "
+            "Можете написати, що саме цікавить: як працює бот, для яких бізнесів підходить, ціна чи запис?"
+        )
 
     def _is_complex_query(self, normalized: str) -> bool:
         complex_markers = [
@@ -104,18 +117,16 @@ class ReplyService:
         if self._is_complex_query(normalized):
             if language == "en":
                 return (
-                    "Так, такі сценарії зазвичай вирішуються через логіку бота, CRM та правила передачі заявок. Можемо коротко пройтись по вашому процесу на дзвінку, якщо вам ок."
+                    "Такі сценарії зазвичай вирішуються через логіку бота, CRM та правила передачі заявок. Щоб відповісти точніше, напишіть, яка система або процес у вас зараз."
                 )
             return (
-                "Так, такі сценарії зазвичай вирішуються через логіку бота, CRM та правила передачі заявок. "
-                "Можемо коротко пройтись по вашому процесу на дзвінку, якщо вам ок."
+                "Такі сценарії зазвичай вирішуються через логіку бота, CRM та правила передачі заявок. "
+                "Щоб відповісти точніше, напишіть, яка система або процес у вас зараз."
             )
         return self.get_escalation_reply(language)
 
     def get_safe_fallback_reply(self, language: str) -> str:
-        if language == "en":
-            return "Зрозумів. Якщо коротко: ми допомагаємо автоматизувати відповіді й запис у месенджерах, щоб не втрачати заявки."
-        return "Зрозумів. Якщо коротко: ми допомагаємо автоматизувати відповіді й запис у месенджерах, щоб не втрачати заявки."
+        return self._get_unknown_fallback_reply(language)
 
     def detect_user_language(self, text: str) -> str:
         return self._detect_language(text)
@@ -242,6 +253,47 @@ class ReplyService:
 
     def _get_consultation_reply(self, language: str) -> str:
         return self._fallback_for_intent(IntentType.BOOKING_REQUEST, language)
+
+    def _get_unknown_fallback_reply(self, language: str) -> str:
+        return (
+            "Можете трохи уточнити, що саме цікавить: як працює бот, "
+            "для яких бізнесів підходить, ціна чи запис на дзвінок?"
+        )
+
+    def _get_rejection_reply(self, language: str) -> str:
+        return (
+            "Зрозумів, дякую. Якщо пізніше буде актуально автоматизувати відповіді "
+            "в месенджерах — можете просто написати сюди."
+        )
+
+    def _get_repeated_rejection_reply(self, language: str) -> str:
+        return "Добре, зрозумів."
+
+    def get_rejection_reply(self, language: str, *, repeated: bool = False) -> str:
+        if repeated:
+            return self._get_repeated_rejection_reply(language)
+        return self._get_rejection_reply(language)
+
+    def _get_frustrated_reply(self, language: str) -> str:
+        return (
+            "Розумію, відповідь була не зовсім по суті. Можу коротко пояснити конкретно: "
+            "що робить бот, для яких бізнесів підходить або скільки коштує."
+        )
+
+    def _get_industries_reply(self, language: str) -> str:
+        return (
+            "Найкраще бот підходить для сервісних бізнесів, де є багато вхідних повідомлень, "
+            "записів або заявок.\n\n"
+            "Наприклад:\n"
+            "— стоматології та клініки\n"
+            "— СТО / автосервіси\n"
+            "— салони краси, барбершопи, косметології\n"
+            "— освітні курси та школи\n"
+            "— фітнес / спорт студії\n"
+            "— консультаційні та локальні сервіси\n\n"
+            "Якщо коротко: там, де клієнти часто пишуть у месенджери і потрібно швидко "
+            "відповідати, кваліфікувати заявку або доводити до запису."
+        )
 
     def _get_interest_signal_reply(self, language: str) -> str:
         if language == "uk":
@@ -424,7 +476,10 @@ class ReplyService:
             IntentType.PRICE,
             IntentType.CHANNELS,
             IntentType.SERVICE_DESCRIPTION,
+            IntentType.INDUSTRIES,
             IntentType.USE_CASES,
+            IntentType.REJECTION,
+            IntentType.FRUSTRATED,
         }
         if intent in basic_intents:
             return "basic", intent.value
@@ -672,12 +727,13 @@ class ReplyService:
         user_text: Optional[str] = None,
     ) -> str:
         normalized = self._normalize(user_text or "")
+        standard_description = (
+            "Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram. "
+            "Він відповідає на типові повідомлення, збирає заявки, кваліфікує клієнтів "
+            "і допомагає доводити їх до запису або дзвінка."
+        )
         if normalized and self._is_what_does_bot_do_query(normalized) and language == "uk":
-            return (
-                "Це AI-бот, який відповідає на повідомлення в Instagram/Facebook, "
-                "закриває типові питання і допомагає довести клієнта до запису або дзвінка. "
-                "Тобто замість ручних відповідей бот робить це автоматично."
-            )
+            return standard_description
         if normalized and self._is_service_includes_query(normalized):
             faq_answer = self._get_faq_answer("Що входить у сервіс?", language)
             if faq_answer:
@@ -712,11 +768,9 @@ class ReplyService:
 
             parts: List[str] = []
             if short_description:
-                parts.append(short_description)
+                parts.append(standard_description)
             else:
-                parts.append(
-                    "Ми налаштовуємо AI-бота, який відповідає на типові звернення, допомагає кваліфікувати заявки та веде клієнта до запису."
-                )
+                parts.append(standard_description)
             if includes and normalized and self._is_service_includes_query(normalized):
                 parts.append("У сервіс зазвичай входить " + ", ".join(includes[:4]) + ".")
             return " ".join(parts)
@@ -880,6 +934,9 @@ class ReplyService:
                 return channel_reply
             return self._fallback_for_intent(IntentType.CHANNELS, language)
 
+        if resolved_intent == IntentType.INDUSTRIES:
+            return self._get_industries_reply(language)
+
         if resolved_intent == IntentType.USE_CASES:
             return self._get_use_cases_reply(language)
 
@@ -888,6 +945,12 @@ class ReplyService:
 
         if resolved_intent == IntentType.INTEREST_SIGNAL:
             return self._get_interest_signal_reply(language)
+
+        if resolved_intent == IntentType.REJECTION:
+            return self._get_rejection_reply(language)
+
+        if resolved_intent == IntentType.FRUSTRATED:
+            return self._get_frustrated_reply(language)
 
         if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
             return self._get_consultation_reply(language)
