@@ -832,6 +832,31 @@ async def test_interest_signal_acceptance_starts_booking_time_prompt(processor_f
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
+async def test_greeting_followup_with_auto_service_context_gets_niche_reply(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="Привіт"))
+    result = await processor.process(_message(text="так підкажи. ми сто."))
+
+    assert result["intent"] == "business_context_followup"
+    assert "для автосервісу" in result["reply_text"]
+    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_soft_call_cta_acceptance_with_typo_starts_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="Привіт"))
+    await processor.process(_message(text="так підкажи. ми сто."))
+    result = await processor.process(_message(text="так окк"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "waiting_for_time"
+    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
 async def test_use_cases_reply_contains_dental_clinic(processor_factory):
     processor, _ = processor_factory()
 

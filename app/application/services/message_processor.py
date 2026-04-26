@@ -274,14 +274,38 @@ class MessageProcessor:
                 return True
         return False
 
+    def _has_recent_soft_call_cta(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        markers = [
+            "зручно буде на дзвінок",
+            "якщо вам ок",
+            "якщо вам ок.",
+            "коротко обговорити на дзвінку",
+            "коротко прикинути сценарій",
+        ]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if any(marker in normalized for marker in markers):
+                return True
+        return False
+
     def _looks_like_interest_booking_acceptance(self, text: str) -> bool:
         normalized = " ".join(text.strip().lower().split())
         normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        normalized = normalized.replace(",", " ")
+        normalized = " ".join(normalized.split())
         acceptances = {
             "так",
+            "так ок",
+            "так окк",
+            "так окей",
             "давай",
             "давайте",
             "ок",
+            "окк",
             "окей",
             "добре",
             "можна",
@@ -291,6 +315,17 @@ class MessageProcessor:
             "sure",
         }
         return normalized in acceptances
+
+    def _has_recent_intro_offer(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if "коротко підкажу, як це може працювати" in normalized:
+                return True
+        return False
 
     def _has_recent_price_reply(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
@@ -563,7 +598,7 @@ class MessageProcessor:
             )
 
         if (
-            self._has_recent_interest_signal_reply(message.sender_id)
+            self._has_recent_soft_call_cta(message.sender_id)
             and self._looks_like_interest_booking_acceptance(message.user_message)
         ):
             booking_result = self.booking_service.start_booking_flow(
@@ -576,6 +611,21 @@ class MessageProcessor:
                 reply_text=booking_result["reply_text"],
                 intent_value="booking_request",
                 booking_result=booking_result,
+            )
+
+        if (
+            self._has_recent_intro_offer(message.sender_id)
+            and self._looks_like_business_details(message.user_message)
+            and not self._looks_like_booking_message(message.user_message)
+            and not self._looks_like_reschedule_request(message.user_message)
+            and not self._looks_like_cancel_request(message.user_message)
+        ):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=IntentType.GENERAL_QUESTION),
+                intent_value="business_context_followup",
+                routing_category="consultation_cta",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
         contextual_short_reply = self._get_contextual_short_reply(message.user_message)
