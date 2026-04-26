@@ -428,6 +428,18 @@ async def test_business_details_after_price_prompt_call_not_slots(processor_fact
     assert "Можемо запропонувати кілька варіантів" not in detail_result["reply_text"]
 
 
+async def test_channel_question_after_price_stays_channel_answer(processor_factory):
+    processor, _ = processor_factory()
+
+    await processor.process(_message(text="скільки коштує?"))
+    result = await processor.process(_message(text="це тільки інстаграм?"))
+
+    assert result["intent"] == "channels"
+    assert "Instagram" in result["reply_text"]
+    assert "Telegram" in result["reply_text"]
+    assert "дзвін" not in result["reply_text"].lower()
+
+
 async def test_soft_followup_decline_does_not_start_booking(processor_factory):
     processor, _ = processor_factory()
 
@@ -1107,7 +1119,7 @@ async def test_service_question_what_does_your_bot_do_returns_explanation_not_ct
 
     assert result["intent"] == "service_description"
     assert result["routing_category"] == "answered_basic"
-    assert "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram." in result["reply_text"]
+    assert "Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram." in result["reply_text"]
     assert "Актуально розглядаєте впровадження" in result["reply_text"]
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
 
@@ -1275,6 +1287,90 @@ async def test_service_intro_then_interest_asks_business_context_not_booking(pro
     assert "Підкажіть, будь ласка, точний день і час" not in niche["reply_text"]
 
 
+async def test_live_interest_details_and_business_context_dm_flow(processor_factory):
+    processor, booking_service = processor_factory()
+
+    intro = await processor.process(_message(text="Hi, розкажіть що ви робите"))
+    actual = await processor.process(_message(text="так актуально"))
+    details = await processor.process(_message(text="спочатку хочу більше деталей"))
+
+    assert "Актуально розглядаєте впровадження" in intro["reply_text"]
+    assert actual["intent"] == "interest_followup"
+    assert "Для якого бізнесу" in actual["reply_text"]
+    assert actual["booking_result"] is None
+    assert details["intent"] == "more_details"
+    assert "можна без дзвінка" in details["reply_text"]
+    assert "де зараз найбільше звернень" in details["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_typo_language_and_instagram_volume_followup_is_contextual(processor_factory):
+    processor, _ = processor_factory()
+
+    service = await processor.process(_message(text="шо ви робте?"))
+    niche = await processor.process(_message(text="а для сто підійде?"))
+    volume = await processor.process(_message(text="ну типу в нас багато пишут в інсту"))
+
+    assert "AI-бота" in service["reply_text"]
+    assert "для автосервісу" in niche["reply_text"]
+    assert volume["intent"] == "business_context_followup"
+    assert "багато звернень саме в Instagram" in volume["reply_text"]
+    assert "що найчастіше питають" in volume["reply_text"]
+
+
+async def test_not_ready_for_call_gets_no_pressure_explanation(processor_factory):
+    processor, booking_service = processor_factory()
+
+    explanation = await processor.process(_message(text="а можете просто пояснити без дзвінка?"))
+    thinking = await processor.process(_message(text="я поки думаю"))
+
+    assert explanation["intent"] == "more_details"
+    assert "можна без дзвінка" in explanation["reply_text"]
+    assert "Підкажіть, будь ласка, точний день і час" not in explanation["reply_text"]
+    assert thinking["intent"] == "contextual_short_reply"
+    assert "Без проблем" in thinking["reply_text"]
+    assert "дзвін" not in thinking["reply_text"].lower()
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_no_call_and_text_explanation_variants_do_not_start_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    for text in [
+        "я хочу спершу зрозуміти",
+        "не хочу дзвінок поки",
+        "можете в тексті пояснити?",
+    ]:
+        result = await processor.process(_message(text=text))
+        assert result["intent"] == "more_details"
+        assert "можна без дзвінка" in result["reply_text"]
+        assert result["booking_result"] is None
+        assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_safe_fallback_varies_for_short_unclear_replies(processor_factory):
+    processor, booking_service = processor_factory()
+
+    unclear = await processor.process(_message(text="?????"))
+    weak = await processor.process(_message(text="ну це таке"))
+    agree = await processor.process(_message(text="ага"))
+    relevant = await processor.process(_message(text="актуально"))
+    maybe = await processor.process(_message(text="можливо"))
+
+    assert "Хочу правильно зрозуміти" in unclear["reply_text"]
+    assert weak["intent"] == "contextual_short_reply"
+    assert "не дуже переконливо" in weak["reply_text"]
+    assert agree["intent"] == "contextual_short_reply"
+    assert "Можу коротко зорієнтувати" in agree["reply_text"]
+    assert relevant["intent"] == "contextual_short_reply"
+    assert "Для якого бізнесу" in relevant["reply_text"]
+    assert maybe["intent"] == "contextual_short_reply"
+    assert "без поспіху" in maybe["reply_text"]
+    assert "дзвін" not in weak["reply_text"].lower()
+    assert "дзвін" not in agree["reply_text"].lower()
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
 async def test_greeting_followup_with_auto_service_context_gets_niche_reply(processor_factory):
     processor, booking_service = processor_factory()
 
@@ -1308,6 +1404,18 @@ async def test_typo_call_request_with_col_starts_booking_time_prompt(processor_f
     assert result["intent"] == "booking_request"
     assert result["booking_result"]["status"] == "waiting_for_time"
     assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+@pytest.mark.parametrize("text", ["хочу консультацію", "забронювати час"])
+async def test_explicit_consultation_and_booking_words_start_booking(processor_factory, text):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text=text))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "waiting_for_time"
+    assert "Підкажіть" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1367,6 +1475,9 @@ async def test_unknown_question_uses_ai_fallback(processor_factory):
     assert result["reply_text"].endswith("AI fallback reply: уточніть, будь ласка, що саме потрібно.")
     assert ai_service.calls
     assert "Ти менеджер Flowly Agency" in ai_service.calls[0]["system_instruction"]
+    assert "емоційно інтелектуальним" in ai_service.calls[0]["system_instruction"]
+    assert "перефразуй" in ai_service.calls[0]["system_instruction"]
+    assert "Не продавай дзвінок на кожне повідомлення" in ai_service.calls[0]["system_instruction"]
 
 
 async def test_industries_reply_contains_service_businesses_and_auto_service(processor_factory):
@@ -1482,7 +1593,7 @@ async def test_manual_negative_dialogue_has_no_forbidden_generic_cta(processor_f
         result = await processor.process(_message(text=text))
         transcript.append((text, result["reply_text"]))
 
-    assert "Привіт! Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram." in transcript[0][1]
+    assert "Ми налаштовуємо AI-бота для Instagram/Facebook/WhatsApp/Telegram." in transcript[0][1]
     assert "Актуально розглядаєте впровадження" in transcript[0][1]
     assert "Найкраще бот підходить для сервісних бізнесів" in transcript[1][1]
     assert transcript[2][1].startswith("Зрозумів, дякую.")
@@ -1537,7 +1648,7 @@ async def test_question_marks_only_get_safe_ukrainian_clarification(processor_fa
 
     result = await processor.process(_message(text="?????"))
 
-    assert "Можете трохи уточнити" in result["reply_text"]
+    assert "Хочу правильно зрозуміти" in result["reply_text"]
     assert "We set up" not in result["reply_text"]
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
 

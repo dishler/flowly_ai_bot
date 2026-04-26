@@ -77,6 +77,18 @@ class MessageProcessor:
     def _looks_like_booking_message(self, text: str) -> bool:
         normalized = text.strip().lower()
         keyword_normalized = self._normalize_for_booking_keywords(text)
+        no_call_markers = [
+            "без дзвінка",
+            "без дзвонка",
+            "не хочу дзвінок",
+            "не хочу дзвонок",
+            "не хочу консультацію",
+            "пояснити без",
+            "в тексті",
+            "текстом",
+        ]
+        if any(marker in keyword_normalized for marker in no_call_markers):
+            return False
 
         consultation_words = [
             "consultation",
@@ -84,7 +96,7 @@ class MessageProcessor:
             "quick call",
             "дзвінок",
             "дзвін",
-            "консультація",
+            "консультац",
             "созвон",
             "зідзвон",
             "зідзвонитися",
@@ -105,6 +117,7 @@ class MessageProcessor:
             "запишіть",
             "записати",
             "забронювати",
+            "брон",
             "плануємо",
             "go",
             "yes",
@@ -496,10 +509,15 @@ class MessageProcessor:
             "окей": "Дякую, зафіксував.",
             "добре": "Добре, дякую.",
             "давай": "Добре, підкажіть, будь ласка, що саме вам зручно обговорити?",
+            "ага": "Зрозумів. Можу коротко зорієнтувати по суті: як працює бот, для яких бізнесів підходить або скільки коштує.",
+            "актуально": "Супер. Для якого бізнесу розглядаєте бота і що хочете автоматизувати в першу чергу?",
+            "можливо": "Ок, можна рухатись без поспіху. Найпростіше почати з контексту: який у вас бізнес і де зараз найбільше звернень?",
+            "ну це таке": "Розумію, звучить поки не дуже переконливо. Можу пояснити простіше на прикладі вашого бізнесу, якщо напишете сферу.",
             "можливо потім": soft_followup_reply,
             "можливо пізніше": soft_followup_reply,
             "не зараз": soft_followup_reply,
             "я подумаю": soft_followup_reply,
+            "я поки думаю": "Без проблем. Якщо будете повертатися до теми, можна почати з простого питання: де зараз найбільше ручних відповідей і що саме хочете автоматизувати.",
             "це не питання це пропозиція": "Дякую, зафіксував. Передам це команді, щоб подивилися уважно.",
         }
         return replies.get(normalized)
@@ -536,7 +554,7 @@ class MessageProcessor:
                 "що робить бот, для яких сфер підходить або скільки коштує."
             )
 
-        if reply_text.startswith("Можете трохи уточнити"):
+        if reply_text.startswith("Можете трохи уточнити") or reply_text.startswith("Хочу правильно зрозуміти"):
             return (
                 "Не зовсім зрозумів повідомлення. Напишіть, будь ласка, одним реченням: "
                 "цікавить ціна, канали, сфера бізнесу чи запис на дзвінок?"
@@ -605,6 +623,7 @@ class MessageProcessor:
             "так",
             "так давай",
             "так давайте",
+            "так актуально",
             "так підкажи",
             "так ок",
             "так окк",
@@ -630,6 +649,37 @@ class MessageProcessor:
             return any(marker in normalized for marker in acceptance_markers)
         return False
 
+    def _looks_like_more_details_request(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "більше деталей",
+            "детальніше",
+            "більше детально",
+            "просто пояснити",
+            "пояснити без дзвінка",
+            "без дзвінка",
+            "без дзвонка",
+            "не хочу дзвінок",
+            "не хочу дзвонок",
+            "не хочу консультацію",
+            "в тексті",
+            "текстом",
+            "спочатку хочу більше",
+            "спершу зрозуміти",
+            "спочатку зрозуміти",
+            "хочу спершу зрозуміти",
+            "хочу спочатку зрозуміти",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _get_more_details_reply(self) -> str:
+        return (
+            "Так, звісно, можна без дзвінка. Якщо коротко: бот бере типові повідомлення "
+            "в месенджерах, відповідає клієнтам, уточнює потрібні деталі й передає вже "
+            "готову заявку або веде до запису. Щоб пояснити точніше, який у вас бізнес "
+            "і де зараз найбільше звернень: Instagram, Telegram чи WhatsApp?"
+        )
+
     def _has_recent_intro_offer(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
         previous_items = history[:-1]
@@ -638,6 +688,23 @@ class MessageProcessor:
                 continue
             normalized = item.lower()
             if "коротко підкажу, як це може працювати" in normalized:
+                return True
+        return False
+
+    def _has_recent_niche_reply(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        markers = [
+            "для автосервісу",
+            "для салону краси",
+            "для стоматологій",
+            "для клінік",
+        ]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if any(marker in normalized for marker in markers):
                 return True
         return False
 
@@ -666,6 +733,13 @@ class MessageProcessor:
             "клієнт",
             "заявк",
             "запит",
+            "пиш",
+            "пишут",
+            "пишуть",
+            "інсту",
+            "інста",
+            "instagram",
+            "багато",
             "послуг",
             "менеджер",
             "команд",
@@ -682,6 +756,21 @@ class MessageProcessor:
             "нерухом",
         ]
         return any(marker in normalized for marker in detail_markers)
+
+    def _get_business_context_reply(self, text: str) -> str:
+        normalized = self._normalize_for_conversation_matching(text)
+        if any(marker in normalized for marker in ["інсту", "інста", "instagram"]) and any(
+            marker in normalized for marker in ["багато", "пиш", "пишут", "пишуть"]
+        ):
+            return (
+                "Зрозумів. Якщо багато звернень саме в Instagram, бот може забрати першу лінію: "
+                "відповідати на типові питання, уточнювати запит і збирати контакт або бажаний час. "
+                "А що найчастіше питають клієнти: ціни, запис, послуги чи статус заявки?"
+            )
+        return (
+            "Зрозумів контекст. Тоді бот може закривати типові звернення і передавати менеджеру "
+            "вже більш теплу заявку. Що саме зараз забирає найбільше часу у переписках?"
+        )
 
     def _looks_like_after_hours_question(self, text: str) -> bool:
         normalized = " ".join(text.strip().lower().split())
@@ -1084,6 +1173,15 @@ class MessageProcessor:
                 routing_category="answered_basic",
             )
 
+        if self._looks_like_more_details_request(message.user_message):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_more_details_reply(),
+                intent_value="more_details",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
         if (
             self._has_recent_soft_call_cta(message.sender_id)
             and self._looks_like_interest_booking_acceptance(message.user_message)
@@ -1124,6 +1222,21 @@ class MessageProcessor:
                 intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
+        if (
+            self._has_recent_niche_reply(message.sender_id)
+            and self._looks_like_business_details(message.user_message)
+            and not self._looks_like_booking_message(message.user_message)
+            and not self._looks_like_reschedule_request(message.user_message)
+            and not self._looks_like_cancel_request(message.user_message)
+        ):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_business_context_reply(message.user_message),
+                intent_value="business_context_followup",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
         if self._looks_like_buying_signal(message.user_message):
             language = self.reply_service.detect_user_language(message.user_message)
             return self._build_direct_reply_result(
@@ -1155,6 +1268,21 @@ class MessageProcessor:
                 message=message,
                 reply_text=contextual_short_reply,
                 intent_value="contextual_short_reply",
+            )
+
+        current_intent = self.intent_service.detect_intent(message.user_message)
+        if current_intent in {
+            IntentType.PRICE,
+            IntentType.CHANNELS,
+            IntentType.INDUSTRIES,
+            IntentType.USE_CASES,
+        }:
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=current_intent),
+                intent_value=current_intent.value,
+                routing_category="answered_basic",
+                intent_for_policy=current_intent,
             )
 
         if (
