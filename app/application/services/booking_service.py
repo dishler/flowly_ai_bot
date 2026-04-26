@@ -269,8 +269,11 @@ class BookingService:
     ) -> str:
         return self._build_confirmed_reply(language, start_dt, customer_name)
 
+    def _build_manual_followup_reply(self, language: str) -> str:
+        return "Супер, зафіксували ваш запит 🙌 Ми зв’яжемося з вами, щоб підтвердити час"
+
     def _build_create_failed_reply(self, language: str, start_dt: datetime | None = None) -> str:
-        return self._build_confirmed_reply(language, start_dt)
+        return self._build_manual_followup_reply(language)
 
     def _normalize_phone(self, raw_phone: str) -> str:
         compact = re.sub(r"[^\d+]", "", raw_phone.strip())
@@ -551,17 +554,10 @@ class BookingService:
             phone=phone,
             start_dt=start_dt,
         )
-        self._mark_booking_completed(
-            sender_id,
-            start_dt=start_dt,
-            customer_name=customer_name,
-            email=email,
-            phone=phone,
-        )
         self._clear_pending_confirmation(sender_id)
         return {
             "status": "manual_followup",
-            "reply_text": self._build_create_failed_reply(language, start_dt),
+            "reply_text": self._build_manual_followup_reply(language),
             "event_created": False,
             "booking_state": BookingState.NONE.value,
             "customer_name": customer_name,
@@ -971,10 +967,13 @@ class BookingService:
 
                 description = "\n".join(description_parts)
 
-                if (
+                calendar_configured = bool(
                     self.calendar_service.google_calendar_client
                     and self.calendar_service.google_calendar_client.is_configured()
-                ):
+                )
+                logger.info("Calendar configured: %s", calendar_configured)
+
+                if calendar_configured:
                     created = self.calendar_service.create_booking_event(
                         start_dt=requested_dt,
                         duration_minutes=30,
@@ -997,36 +996,47 @@ class BookingService:
                         phone=contact_details["phone"],
                         calendar_event_id=created.event_id,
                     )
-                    logger.info("Calendar event created for immediate booking")
-                else:
-                    self._save_captured_contact(
+                    logger.info(
+                        "Calendar event created for immediate booking sender_id=%s event_id=%s",
                         sender_id,
+                        created.event_id,
+                    )
+                    return {
+                        "status": "confirmed",
+                        "reply_text": self._build_both_contacts_confirmed_reply(
+                            language,
+                            requested_dt,
+                            contact_details["customer_name"],
+                        ),
+                        "event_created": True,
+                        "booking_state": BookingState.NONE.value,
+                        "event_id": created.event_id,
+                        "event_link": created.html_link,
+                    }
+                else:
+                    logger.warning(
+                        "Google Calendar is not configured; switching immediate booking to manual follow-up sender_id=%s",
+                        sender_id,
+                    )
+                    return self._build_manual_followup_result(
+                        sender_id=sender_id,
+                        language=language,
+                        start_dt=requested_dt,
                         customer_name=contact_details["customer_name"],
                         email=contact_details["email"],
                         phone=contact_details["phone"],
-                        start_dt=requested_dt,
                     )
-                    logger.info("Manual follow-up needed for immediate booking")
-
-                return {
-                    "status": "confirmed",
-                    "reply_text": self._build_both_contacts_confirmed_reply(
-                        language,
-                        requested_dt,
-                        contact_details["customer_name"],
-                    ),
-                    "event_created": True,
-                    "booking_state": BookingState.NONE.value,
-                }
 
             except Exception:
                 logger.exception("Immediate booking creation failed")
-                return {
-                    "status": "create_failed",
-                    "reply_text": self._build_create_failed_reply(language),
-                    "event_created": False,
-                    "booking_state": BookingState.NONE.value,
-                }
+                return self._build_manual_followup_result(
+                    sender_id=sender_id,
+                    language=language,
+                    start_dt=requested_dt,
+                    customer_name=contact_details["customer_name"],
+                    email=contact_details["email"],
+                    phone=contact_details["phone"],
+                )
 
         self._save_booking_state(
             sender_id,
@@ -1035,7 +1045,11 @@ class BookingService:
             start_dt=requested_dt,
             source_channel=source_channel,
             context_summary=message_text[:280],
-            customer_name=contact_details["customer_name"],
+            customer_name=(
+                contact_details["customer_name"]
+                if contact_details["has_phone"] or contact_details["has_email"]
+                else None
+            ),
             contact_email=contact_details["email"],
             contact_phone=contact_details["phone"],
         )
@@ -1209,6 +1223,12 @@ class BookingService:
                 "booking_state": BookingState.NONE.value,
             }
 
+        calendar_configured = bool(
+            self.calendar_service.google_calendar_client
+            and self.calendar_service.google_calendar_client.is_configured()
+        )
+        logger.info("Calendar configured: %s", calendar_configured)
+
         if not self.calendar_service.google_calendar_client:
             return self._build_manual_followup_result(
                 sender_id=sender_id,
@@ -1219,7 +1239,7 @@ class BookingService:
                 phone=pending.get("contact_phone"),
             )
 
-        if not self.calendar_service.google_calendar_client.is_configured():
+        if not calendar_configured:
             logger.warning(
                 "Google Calendar is not configured; switching to manual follow-up sender_id=%s",
                 sender_id,
@@ -1260,7 +1280,11 @@ class BookingService:
                 description=description,
                 attendee_emails=[],
             )
-            logger.info("Calendar event created")
+            logger.info(
+                "Calendar event created sender_id=%s event_id=%s",
+                sender_id,
+                created.event_id,
+            )
         except Exception:
             logger.exception("Booking creation failed")
             logger.exception(

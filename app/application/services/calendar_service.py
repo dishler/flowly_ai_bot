@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 from zoneinfo import ZoneInfo
@@ -9,6 +10,8 @@ from app.infrastructure.google.calendar_client import (
     CreatedCalendarEvent,
     GoogleCalendarClient,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CalendarService:
@@ -48,7 +51,13 @@ class CalendarService:
         return mapping.get(slot_key, {}).get(language, mapping.get(slot_key, {}).get("en", "tomorrow at 11:00"))
 
     def get_available_slots(self, language: str) -> List[str]:
-        if not self.google_calendar_client or not self.google_calendar_client.is_configured():
+        calendar_configured = (
+            self.google_calendar_client.is_configured()
+            if self.google_calendar_client
+            else False
+        )
+        logger.info(f"Calendar configured: {calendar_configured}")
+        if not calendar_configured:
             return self.get_fallback_slots(language)
 
         now = datetime.now(self.timezone)
@@ -76,7 +85,13 @@ class CalendarService:
         return available
 
     def check_specific_time_availability(self, start_dt: datetime, duration_minutes: int = 30) -> bool:
-        if not self.google_calendar_client or not self.google_calendar_client.is_configured():
+        calendar_configured = (
+            self.google_calendar_client.is_configured()
+            if self.google_calendar_client
+            else False
+        )
+        logger.info(f"Calendar configured: {calendar_configured}")
+        if not calendar_configured:
             return True
 
         if start_dt.tzinfo is None:
@@ -93,7 +108,13 @@ class CalendarService:
         description: str = "",
         attendee_emails: Optional[List[str]] = None,
     ) -> CreatedCalendarEvent:
-        if not self.google_calendar_client or not self.google_calendar_client.is_configured():
+        calendar_configured = (
+            self.google_calendar_client.is_configured()
+            if self.google_calendar_client
+            else False
+        )
+        logger.info(f"Calendar configured: {calendar_configured}")
+        if not calendar_configured:
             raise RuntimeError("Google Calendar is not configured for event creation.")
 
         if start_dt.tzinfo is None:
@@ -110,7 +131,13 @@ class CalendarService:
         )
 
     def delete_event(self, event_id: str) -> None:
-        if not self.google_calendar_client or not self.google_calendar_client.is_configured():
+        calendar_configured = (
+            self.google_calendar_client.is_configured()
+            if self.google_calendar_client
+            else False
+        )
+        logger.info(f"Calendar configured: {calendar_configured}")
+        if not calendar_configured:
             raise RuntimeError("Google Calendar is not configured for event deletion.")
 
         self.google_calendar_client.delete_event(event_id)

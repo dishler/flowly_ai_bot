@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -40,15 +41,20 @@ class GoogleCalendarClient:
         self.enabled = settings.google_calendar_enabled
         self.calendar_id = settings.google_calendar_id
         self.service_account_file = settings.google_service_account_file
+        self.service_account_json = settings.google_service_account_json
         self.timezone = settings.google_calendar_timezone
         self._service = None
 
     def is_configured(self) -> bool:
+        has_credentials_file = bool(
+            self.service_account_file
+            and Path(self.service_account_file).exists()
+        )
+        has_credentials_json = bool(self.service_account_json.strip())
         return bool(
             self.enabled
             and self.calendar_id
-            and self.service_account_file
-            and Path(self.service_account_file).exists()
+            and (has_credentials_file or has_credentials_json)
         )
 
     def _get_service(self):
@@ -58,10 +64,23 @@ class GoogleCalendarClient:
         if not self.is_configured():
             raise GoogleCalendarClientError("Google Calendar is not fully configured.")
 
-        credentials = service_account.Credentials.from_service_account_file(
-            self.service_account_file,
-            scopes=SCOPES,
-        )
+        if self.service_account_file and Path(self.service_account_file).exists():
+            credentials = service_account.Credentials.from_service_account_file(
+                self.service_account_file,
+                scopes=SCOPES,
+            )
+        elif self.service_account_json.strip():
+            try:
+                credentials_info = json.loads(self.service_account_json)
+            except json.JSONDecodeError as exc:
+                raise GoogleCalendarClientError("Invalid Google service account JSON.") from exc
+
+            credentials = service_account.Credentials.from_service_account_info(
+                credentials_info,
+                scopes=SCOPES,
+            )
+        else:
+            raise GoogleCalendarClientError("Missing Google Calendar credentials.")
 
         self._service = build(
             "calendar",
@@ -83,7 +102,7 @@ class GoogleCalendarClient:
                 "enabled": self.enabled,
                 "configured": False,
                 "connected": False,
-                "reason": "Missing Google Calendar env or credentials file.",
+                "reason": "Missing Google Calendar env or credentials.",
             }
 
         try:

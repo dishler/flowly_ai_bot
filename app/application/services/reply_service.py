@@ -621,6 +621,19 @@ class ReplyService:
         includes = service.get("includes", [])
 
         if language == "uk":
+            if normalized and self._is_for_whom_query(normalized) and not short_description:
+                return (
+                    "Найчастіше Flowly підходить сервісним бізнесам: салонам краси, "
+                    "клінікам, стоматологіям, спортзалам, автосервісам та іншим компаніям, "
+                    "які регулярно отримують звернення в месенджерах."
+                )
+            if normalized and self._is_service_includes_query(normalized) and not includes:
+                return (
+                    "У сервіс входять аудит воронки заявок, налаштування автоматичних "
+                    "відповідей у месенджерах, AI-бот для обробки звернень, онлайн-запис, "
+                    "нагадування, єдине місце для всіх заявок і подальша оптимізація після запуску."
+                )
+
             parts: List[str] = []
             if short_description:
                 parts.append(short_description)

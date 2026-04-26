@@ -74,6 +74,7 @@ class RecordingCreateCalendarService(CalendarService):
     def __init__(self) -> None:
         super().__init__(google_calendar_client=DummyConfiguredCalendarClient())
         self.created_descriptions = []
+        self.created_events = []
 
     def check_specific_time_availability(self, start_dt, duration_minutes: int = 30) -> bool:
         return True
@@ -87,6 +88,15 @@ class RecordingCreateCalendarService(CalendarService):
         attendee_emails=None,
     ):
         self.created_descriptions.append(description)
+        self.created_events.append(
+            {
+                "start_dt": start_dt,
+                "duration_minutes": duration_minutes,
+                "summary": summary,
+                "description": description,
+                "attendee_emails": attendee_emails or [],
+            }
+        )
 
         class CreatedEvent:
             event_id = "calendar-event-created"
@@ -94,6 +104,23 @@ class RecordingCreateCalendarService(CalendarService):
             status = "confirmed"
 
         return CreatedEvent()
+
+
+class FailingCreateCalendarService(RecordingCreateCalendarService):
+    def create_booking_event(
+        self,
+        start_dt,
+        duration_minutes: int = 30,
+        summary: str = "Consultation call",
+        description: str = "",
+        attendee_emails=None,
+    ):
+        raise RuntimeError("create failed")
+
+
+class BusyThenAvailableCalendarService(CalendarService):
+    def check_specific_time_availability(self, start_dt, duration_minutes: int = 30) -> bool:
+        return not (start_dt.hour == 12 and start_dt.minute == 30)
 
 
 @pytest.fixture
@@ -491,8 +518,11 @@ async def test_booking_collects_name_and_writes_calendar_description(processor_f
 
     assert "ваше ім’я та номер телефону або email" in time_result["reply_text"]
     assert contact_result["booking_result"]["status"] == "confirmed"
+    assert contact_result["booking_result"]["event_created"] is True
+    assert contact_result["booking_result"]["event_id"] == "calendar-event-created"
     assert contact_result["booking_result"]["customer_name"] == "Іван"
     assert calendar_service.created_descriptions
+    assert len(calendar_service.created_events) == 1
     description = calendar_service.created_descriptions[0]
     assert "Booked via Flowly Meta Bot" in description
     assert "Customer name: Іван" in description
@@ -532,17 +562,69 @@ async def test_booking_name_only_asks_for_contact(processor_factory):
 async def test_booking_with_contact_in_initial_message(processor_factory):
     processor, booking_service = processor_factory()
 
-    result = await processor.process(_message(text="Давайте дзвінок завтра Іван 0991234567"))
+    result = await processor.process(_message(text="Давайте дзвінок завтра о 12 Іван 0991234567"))
 
     assert result["intent"] == "booking_request"
-    assert result["booking_result"]["status"] == "confirmed"
-    assert "подтвердили" in result["booking_result"]["reply_text"] or "підтвердили" in result["booking_result"]["reply_text"]
-    assert result["booking_result"]["event_created"] is True
+    assert result["booking_result"]["status"] == "manual_followup"
+    assert result["booking_result"]["reply_text"] == (
+        "Супер, зафіксували ваш запит 🙌 Ми зв’яжемося з вами, щоб підтвердити час"
+    )
+    assert "підтвердили дзвінок" not in result["booking_result"]["reply_text"]
+    assert result["booking_result"]["event_created"] is False
+    assert not booking_service.has_confirmed_booking("user-1")
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
-async def test_booking_slot_suggestion_and_confirmation(processor_factory):
+async def test_booking_with_contact_in_initial_message_creates_calendar_event_when_configured(processor_factory):
+    calendar_service = RecordingCreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    result = await processor.process(_message(text="Давайте дзвінок завтра о 12 Іван 0991234567"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "confirmed"
+    assert result["booking_result"]["event_created"] is True
+    assert result["booking_result"]["event_id"] == "calendar-event-created"
+    assert "підтвердили дзвінок" in result["booking_result"]["reply_text"]
+    assert booking_service.has_confirmed_booking("user-1")
+    assert len(calendar_service.created_events) == 1
+
+
+async def test_booking_manual_followup_when_calendar_not_configured_does_not_confirm(processor_factory):
     processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра о 12"))
+    result = await processor.process(_message(text="Іван 0987121328"))
+
+    assert result["booking_result"]["status"] == "manual_followup"
+    assert result["booking_result"]["event_created"] is False
+    assert result["booking_result"]["reply_text"] == (
+        "Супер, зафіксували ваш запит 🙌 Ми зв’яжемося з вами, щоб підтвердити час"
+    )
+    assert "підтвердили дзвінок" not in result["booking_result"]["reply_text"]
+    assert not booking_service.has_confirmed_booking("user-1")
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_booking_manual_followup_when_calendar_create_fails(processor_factory):
+    calendar_service = FailingCreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра о 12"))
+    result = await processor.process(_message(text="Іван 0987121328"))
+
+    assert result["booking_result"]["status"] == "manual_followup"
+    assert result["booking_result"]["event_created"] is False
+    assert result["booking_result"]["reply_text"] == (
+        "Супер, зафіксували ваш запит 🙌 Ми зв’яжемося з вами, щоб підтвердити час"
+    )
+    assert not booking_service.has_confirmed_booking("user-1")
+
+
+async def test_booking_slot_suggestion_and_confirmation(processor_factory):
+    processor, booking_service = processor_factory(calendar_service=BusyThenAvailableCalendarService())
 
     # Request a busy slot
     result1 = await processor.process(_message(text="давай дзвінок завтра 12:30"))
@@ -551,10 +633,46 @@ async def test_booking_slot_suggestion_and_confirmation(processor_factory):
 
     # Confirm with "ок"
     result2 = await processor.process(_message(text="ок"))
-    assert result2["intent"] == "booking_request"
+    assert result2["intent"] == "booking_flow"
     assert result2["booking_result"]["status"] == "waiting_for_contact"
 
     # Provide contact
     result3 = await processor.process(_message(text="Іван 0991234567"))
-    assert result3["booking_result"]["status"] == "confirmed"
-    assert "Супер, Іван" in result3["booking_result"]["reply_text"]
+    assert result3["booking_result"]["status"] == "manual_followup"
+    assert result3["booking_result"]["event_created"] is False
+    assert "зафіксували ваш запит" in result3["booking_result"]["reply_text"]
+    assert not booking_service.has_confirmed_booking("user-1")
+
+
+async def test_service_question_for_whom(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="А для кого це?"))
+
+    assert result["intent"] == "service_description"
+    assert result["routing_category"] == "answered_basic"
+    assert "Для кого це?" not in result["reply_text"]
+    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert "сервісним бізнесам" in result["reply_text"]
+
+
+async def test_service_question_what_does_bot_do(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="Що конкретно робить бот?"))
+
+    assert result["intent"] == "service_description"
+    assert result["routing_category"] == "answered_basic"
+    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert ("працює" in result["reply_text"] or "AI-бот" in result["reply_text"] or "Як це" in result["reply_text"])
+
+
+async def test_service_question_what_is_included(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="Що входить у сервіс?"))
+
+    assert result["intent"] == "service_description"
+    assert result["routing_category"] == "answered_basic"
+    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert ("входить" in result["reply_text"] or "аудит" in result["reply_text"])

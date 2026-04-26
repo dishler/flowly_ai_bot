@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     google_calendar_enabled: bool = Field(default=False)
     google_calendar_id: str = Field(default="")
     google_service_account_file: str = Field(default="")
+    google_service_account_json: str = Field(default="")
     google_calendar_timezone: str = Field(default="Europe/Kyiv")
 
     default_timezone: str = Field(default="Europe/Kyiv")
