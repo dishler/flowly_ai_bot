@@ -583,6 +583,10 @@ class ReplyService:
 
     def _is_what_does_bot_do_query(self, normalized: str) -> bool:
         what_does_markers = [
+            "що робить ваш бот",
+            "що робить бот",
+            "що вміє бот",
+            "як працює бот",
             "що конкретно робить",
             "як це працює",
             "як ви працюєте",
@@ -602,6 +606,12 @@ class ReplyService:
         user_text: Optional[str] = None,
     ) -> str:
         normalized = self._normalize(user_text or "")
+        if normalized and self._is_what_does_bot_do_query(normalized) and language == "uk":
+            return (
+                "Це AI-бот, який відповідає на повідомлення в Instagram/Facebook, "
+                "закриває типові питання і допомагає довести клієнта до запису або дзвінка. "
+                "Тобто замість ручних відповідей бот робить це автоматично."
+            )
         if normalized and self._is_service_includes_query(normalized):
             faq_answer = self._get_faq_answer("Що входить у сервіс?", language)
             if faq_answer:

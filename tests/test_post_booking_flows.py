@@ -123,6 +123,14 @@ class BusyThenAvailableCalendarService(CalendarService):
         return not (start_dt.hour == 12 and start_dt.minute == 30)
 
 
+class BusyUntil1430CreateCalendarService(RecordingCreateCalendarService):
+    def check_specific_time_availability(self, start_dt, duration_minutes: int = 30) -> bool:
+        return not (
+            start_dt.hour == 12 and start_dt.minute == 30
+            or start_dt.hour == 13 and start_dt.minute == 30
+        )
+
+
 @pytest.fixture
 def processor_factory():
     def build(transcript: str = "", calendar_service: CalendarService | None = None):
@@ -644,6 +652,62 @@ async def test_booking_slot_suggestion_and_confirmation(processor_factory):
     assert not booking_service.has_confirmed_booking("user-1")
 
 
+async def test_confirmation_after_suggested_slot_is_not_customer_name(processor_factory):
+    calendar_service = BusyUntil1430CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    suggested = await processor.process(_message(text="Завтра 12:30"))
+    accepted = await processor.process(_message(text="так"))
+
+    assert suggested["booking_result"]["status"] == "slot_suggested"
+    assert "завтра о 14:30" in suggested["reply_text"]
+    assert accepted["booking_result"]["status"] == "waiting_for_contact"
+    assert accepted["reply_text"] == (
+        "Супер, тоді бронюємо завтра о 14:30. "
+        "Залиште, будь ласка, ваше ім’я та номер телефону або email."
+    )
+    pending = booking_service._get_pending_confirmation("user-1")
+    assert pending["customer_name"] is None
+
+
+async def test_phone_only_after_suggested_slot_acceptance_asks_for_name(processor_factory):
+    calendar_service = BusyUntil1430CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра 12:30"))
+    await processor.process(_message(text="так"))
+    result = await processor.process(_message(text="0987121328"))
+
+    assert result["booking_result"]["status"] == "waiting_for_name"
+    assert result["reply_text"] == "Дякую. А підкажіть, будь ласка, ваше ім’я?"
+    pending = booking_service._get_pending_confirmation("user-1")
+    assert pending["customer_name"] is None
+    assert pending["contact_phone"] == "0987121328"
+
+
+async def test_suggested_slot_acceptance_phone_then_name_confirms_with_calendar(processor_factory):
+    calendar_service = BusyUntil1430CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра 12:30"))
+    await processor.process(_message(text="так"))
+    await processor.process(_message(text="0987121328"))
+    result = await processor.process(_message(text="Іван"))
+
+    assert result["booking_result"]["status"] == "confirmed"
+    assert result["booking_result"]["event_created"] is True
+    assert result["booking_result"]["event_id"] == "calendar-event-created"
+    assert result["reply_text"] == (
+        "Супер, Іван, підтвердили дзвінок на завтра о 14:30 🙌 "
+        "Зв’яжемося з вами у цей час."
+    )
+    assert booking_service.has_confirmed_booking("user-1")
+    assert len(calendar_service.created_events) == 1
+
+
 async def test_service_question_for_whom(processor_factory):
     processor, _ = processor_factory()
 
@@ -665,6 +729,21 @@ async def test_service_question_what_does_bot_do(processor_factory):
     assert result["routing_category"] == "answered_basic"
     assert "Так, це можна налаштувати" not in result["reply_text"]
     assert ("працює" in result["reply_text"] or "AI-бот" in result["reply_text"] or "Як це" in result["reply_text"])
+
+
+async def test_service_question_what_does_your_bot_do_returns_explanation_not_cta(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="Що робить ваш бот?"))
+
+    assert result["intent"] == "service_description"
+    assert result["routing_category"] == "answered_basic"
+    assert result["reply_text"] == (
+        "Привіт! Це AI-бот, який відповідає на повідомлення в Instagram/Facebook, "
+        "закриває типові питання і допомагає довести клієнта до запису або дзвінка. "
+        "Тобто замість ручних відповідей бот робить це автоматично."
+    )
+    assert "Так, це можна налаштувати" not in result["reply_text"]
 
 
 async def test_service_question_what_is_included(processor_factory):

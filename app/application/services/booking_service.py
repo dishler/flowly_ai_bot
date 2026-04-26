@@ -123,13 +123,17 @@ class BookingService:
             return "uk"
         return "en"
 
-    def _is_confirmation(self, text: str) -> bool:
-        normalized = text.strip().lower()
+    def _is_confirmation_text(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
         confirmations = {
             "yes", "y", "yeah", "yep", "sure", "ok", "okay", "confirm",
             "так", "та", "ага", "добре", "ок", "підтверджую", "підтвердити",
+            "підходить", "так гуд", "good", "fine",
         }
         return normalized in confirmations
+
+    def _is_confirmation(self, text: str) -> bool:
+        return self._is_confirmation_text(text)
 
     def _is_rejection(self, text: str) -> bool:
         normalized = text.strip().lower()
@@ -162,6 +166,12 @@ class BookingService:
         return (
             f"Супер, слот {formatted} вільний. "
             f"Щоб підтвердити дзвінок, {self._build_name_and_contact_request(language)}."
+        )
+
+    def _build_suggested_slot_accepted_reply(self, language: str, start_dt: datetime) -> str:
+        return (
+            f"Супер, тоді бронюємо {self._format_scheduled_time_for_reply(start_dt, language)}. "
+            "Залиште, будь ласка, ваше ім’я та номер телефону або email."
         )
 
     def _format_scheduled_time_for_reply(self, start_dt: datetime | None, language: str) -> str:
@@ -334,6 +344,9 @@ class BookingService:
         emails: list[str],
         phones: list[str],
     ) -> str | None:
+        if self._is_confirmation_text(text):
+            return None
+
         candidate = text.strip()
         for email in emails:
             candidate = re.sub(re.escape(email), " ", candidate, flags=re.IGNORECASE)
@@ -661,33 +674,28 @@ class BookingService:
 
         language = pending.get("language") or self._detect_language(message_text)
         normalized = message_text.strip().lower()
-        confirmation_words = ["так", "ок", "добре", "підходить", "так гуд", "yes", "ok", "good", "fine"]
 
-        if any(word in normalized for word in confirmation_words):
+        if self._is_confirmation_text(normalized):
             preferred_day = pending.get("last_suggested_day") or "tomorrow"
             candidate_slots = self._suggested_slots_from_pending(pending).get(preferred_day, [])
             if candidate_slots:
                 matched_slot = candidate_slots[0]
-                day_text_by_language = {
-                    "uk": {
-                        "tomorrow": "завтра",
-                        "day_after_tomorrow": "післязавтра",
-                    },
-                    "en": {
-                        "tomorrow": "tomorrow",
-                        "day_after_tomorrow": "day after tomorrow",
-                    },
-                }
-                day_text = day_text_by_language.get(language, day_text_by_language["en"]).get(
-                    preferred_day,
-                    "tomorrow",
-                )
-                booking_text = f"{day_text} о {matched_slot.hour}" if language == "uk" else f"{day_text} at {matched_slot.hour}"
-                return self.start_booking_flow(
-                    sender_id=sender_id,
-                    message_text=booking_text,
+                self._save_booking_state(
+                    sender_id,
+                    state=BookingState.WAITING_FOR_CONTACT,
+                    language=language,
+                    start_dt=matched_slot,
                     source_channel=source_channel or pending.get("source_channel"),
+                    context_summary=pending.get("context_summary"),
                 )
+                return {
+                    "status": "waiting_for_contact",
+                    "reply_text": self._build_suggested_slot_accepted_reply(language, matched_slot),
+                    "requires_confirmation": False,
+                    "requires_contact": True,
+                    "booking_state": BookingState.WAITING_FOR_CONTACT.value,
+                    "start_dt": matched_slot.isoformat(),
+                }
 
         slots_by_day = self._suggested_slots_from_pending(pending)
         requested_day_key = self._detect_requested_day_key(message_text)
@@ -1116,6 +1124,37 @@ class BookingService:
             )
 
         if state == BookingState.WAITING_FOR_CONTACT:
+            if pending.get("availability_context") and self._is_confirmation_text(message_text):
+                try:
+                    accepted_start_dt = self._deserialize_pending_start_dt(pending["start_dt"])
+                except Exception:
+                    logger.exception(
+                        "suggested slot accept failed sender_id=%s raw_start_dt=%r",
+                        sender_id,
+                        pending.get("start_dt"),
+                    )
+                    self._clear_pending_confirmation(sender_id)
+                    return {
+                        "status": "create_failed",
+                        "reply_text": self._build_create_failed_reply(language),
+                        "event_created": False,
+                        "booking_state": BookingState.NONE.value,
+                    }
+
+                pending["customer_name"] = None
+                self._save_pending_confirmation(sender_id, pending)
+                return {
+                    "status": "waiting_for_contact",
+                    "reply_text": self._build_suggested_slot_accepted_reply(
+                        language,
+                        accepted_start_dt,
+                    ),
+                    "event_created": False,
+                    "requires_contact": True,
+                    "booking_state": BookingState.WAITING_FOR_CONTACT.value,
+                    "start_dt": accepted_start_dt.isoformat(),
+                }
+
             if self._looks_like_unrelated_question_during_booking(message_text):
                 return {
                     "status": "booking_unrelated_question",
