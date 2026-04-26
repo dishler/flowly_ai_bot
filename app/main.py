@@ -1,3 +1,6 @@
+import os
+
+import uvicorn
 from fastapi import FastAPI
 
 from app.api.routes.debug_booking import router as debug_booking_router
@@ -131,3 +134,8 @@ app.include_router(health_router)
 app.include_router(meta_webhook_router, prefix="/webhooks")
 app.include_router(debug_booking_router)
 app.include_router(debug_reply_router)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
