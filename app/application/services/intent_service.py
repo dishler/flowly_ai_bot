@@ -109,13 +109,26 @@ class IntentService:
             "meeting",
         ]
 
-        # Priority: PRICE > CHANNELS > SERVICE_DESCRIPTION > BOOKING > FALLBACK
+        interest_markers = [
+            "цікаво",
+            "звучить цікаво",
+            "ок цікаво",
+            "ок, цікаво",
+            "гаразд цікаво",
+            "можливо цікаво",
+            "хм цікаво",
+            "хм, цікаво",
+        ]
+
+        # Priority: PRICE > CHANNELS > SERVICE_DESCRIPTION > INTEREST > BOOKING > FALLBACK
         if any(marker in normalized for marker in price_markers):
             intent = IntentType.PRICE
         elif any(marker in normalized for marker in channel_markers):
             intent = IntentType.CHANNELS
         elif any(marker in normalized for marker in service_markers):
             intent = IntentType.SERVICE_DESCRIPTION
+        elif any(marker in normalized for marker in interest_markers):
+            intent = IntentType.INTEREST_SIGNAL
         elif any(marker in normalized for marker in booking_markers):
             intent = IntentType.BOOKING_REQUEST
         else:

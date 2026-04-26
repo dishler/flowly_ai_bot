@@ -755,3 +755,36 @@ async def test_service_question_what_is_included(processor_factory):
     assert result["routing_category"] == "answered_basic"
     assert "Так, це можна налаштувати" not in result["reply_text"]
     assert ("входить" in result["reply_text"] or "аудит" in result["reply_text"])
+
+
+async def test_interest_signal_returns_soft_call_cta(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="гаразд цікаво"))
+
+    assert result["intent"] == "interest_signal"
+    assert result["routing_category"] == "consultation_cta"
+    assert "Зручно буде на дзвінок?" in result["reply_text"]
+    assert result["booking_result"] is None
+
+
+async def test_interest_signal_does_not_use_generic_cta(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="звучить цікаво"))
+
+    assert result["intent"] == "interest_signal"
+    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert "Можемо коротко обговорити ваш процес" in result["reply_text"]
+
+
+async def test_interest_signal_acceptance_starts_booking_time_prompt(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="гаразд цікаво"))
+    result = await processor.process(_message(text="так"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "waiting_for_time"
+    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"

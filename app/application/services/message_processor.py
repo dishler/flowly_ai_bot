@@ -20,6 +20,7 @@ _STANDARD_SALES_INTENTS = frozenset(
         IntentType.PRICE,
         IntentType.CHANNELS,
         IntentType.SERVICE_DESCRIPTION,
+        IntentType.INTEREST_SIGNAL,
         IntentType.BOOKING_REQUEST,
         IntentType.CONSULTATION_INTEREST,
     }
@@ -260,6 +261,35 @@ class MessageProcessor:
             "це не питання це пропозиція": "Дякую, зафіксував. Передам це команді, щоб подивилися уважно.",
         }
         return replies.get(normalized)
+
+    def _has_recent_interest_signal_reply(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if "зручно буде на дзвінок" in normalized:
+                return True
+        return False
+
+    def _looks_like_interest_booking_acceptance(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        acceptances = {
+            "так",
+            "давай",
+            "давайте",
+            "ок",
+            "окей",
+            "добре",
+            "можна",
+            "yes",
+            "ok",
+            "okay",
+            "sure",
+        }
+        return normalized in acceptances
 
     def _has_recent_price_reply(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
@@ -529,6 +559,22 @@ class MessageProcessor:
                 message=message,
                 reply_text=reply_text,
                 intent_value="booking_call_explanation",
+            )
+
+        if (
+            self._has_recent_interest_signal_reply(message.sender_id)
+            and self._looks_like_interest_booking_acceptance(message.user_message)
+        ):
+            booking_result = self.booking_service.start_booking_flow(
+                sender_id=message.sender_id,
+                message_text="дзвінок",
+                source_channel=message.platform,
+            )
+            return self._build_booking_reply_result(
+                message=message,
+                reply_text=booking_result["reply_text"],
+                intent_value="booking_request",
+                booking_result=booking_result,
             )
 
         contextual_short_reply = self._get_contextual_short_reply(message.user_message)

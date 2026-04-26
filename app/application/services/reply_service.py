@@ -239,6 +239,17 @@ class ReplyService:
     def _get_consultation_reply(self, language: str) -> str:
         return self._fallback_for_intent(IntentType.BOOKING_REQUEST, language)
 
+    def _get_interest_signal_reply(self, language: str) -> str:
+        if language == "uk":
+            return (
+                "Супер. Можемо коротко обговорити ваш процес і подивитись, "
+                "як це може працювати саме у вас. Зручно буде на дзвінок?"
+            )
+        return (
+            "Супер. Можемо коротко обговорити ваш процес і подивитись, "
+            "як це може працювати саме у вас. Зручно буде на дзвінок?"
+        )
+
     def _is_price_query(self, normalized: str) -> bool:
         price_markers = [
             "price",
@@ -364,6 +375,8 @@ class ReplyService:
         }
         if intent in basic_intents:
             return "basic", intent.value
+        if intent == IntentType.INTEREST_SIGNAL:
+            return "mid", intent.value
         if self._is_greeting(normalized):
             return "basic", "greeting"
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
@@ -816,6 +829,9 @@ class ReplyService:
 
         if resolved_intent == IntentType.SERVICE_DESCRIPTION:
             return self._get_service_description_fallback_reply(language, text)
+
+        if resolved_intent == IntentType.INTEREST_SIGNAL:
+            return self._get_interest_signal_reply(language)
 
         if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
             return self._get_consultation_reply(language)
