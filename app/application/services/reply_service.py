@@ -114,8 +114,20 @@ class ReplyService:
 
     def get_contextual_complex_reply(self, user_text: str, language: str) -> str:
         normalized = self._normalize(user_text)
+        if self._is_client_questions_query(normalized):
+            return self._get_client_questions_reply(language)
+        if self._is_repair_price_query(normalized):
+            return self._get_repair_price_reply(language)
+        if self._is_price_objection(normalized):
+            return self._get_price_objection_reply(language)
         if self._is_guarantee_query(normalized):
             return self._get_guarantee_reply(language)
+        if any(marker in normalized for marker in ["філі", "адміністратор", "адміністратори", "branches"]):
+            return (
+                "Так, це можна налаштувати логікою маршрутизації: бот може уточнювати філію, "
+                "напрям або послугу і передавати заявку потрібному адміністратору. Щоб сказати "
+                "точніше, краще коротко розібрати ваш процес і правила розподілу заявок."
+            )
         if self._is_complex_query(normalized):
             if language == "en":
                 return (
@@ -129,6 +141,9 @@ class ReplyService:
 
     def get_safe_fallback_reply(self, language: str) -> str:
         return self._get_unknown_fallback_reply(language)
+
+    def get_language_request_reply(self, language: str) -> str:
+        return "Можу відповідати українською або англійською."
 
     def detect_user_language(self, text: str) -> str:
         return self._detect_language(text)
@@ -398,6 +413,12 @@ class ReplyService:
             "що за сервіс",
             "розкажіть про сервіс",
             "розкажіть детальніше",
+            "пояснити ваш сервіс",
+            "поясніть ваш сервіс",
+            "поясніть сервіс",
+            "можете коротко пояснити",
+            "хочу зрозуміти що за бот",
+            "що за бот",
             "для кого це",
             "кому це підходить",
             "як ви працюєте",
@@ -465,6 +486,9 @@ class ReplyService:
             "час впровадження",
             "термін впровадження",
             "терміни впровадження",
+            "як довго займає впровадження",
+            "як довго впровадження",
+            "впроваджен",
             "як швидко запуск",
             "як швидко можна запустити",
             "коли запуск",
@@ -495,6 +519,56 @@ class ReplyService:
         return (
             "Гарантовані цифри без аналізу кейсу не обіцяємо. Можемо чесно оцінити ваш процес, "
             "показати, де бот може зняти ручну роботу і що реально варто автоматизувати першим."
+        )
+
+    def _is_client_questions_query(self, normalized: str) -> bool:
+        markers = [
+            "що бот буде питати",
+            "що буде питати",
+            "які питання ставить",
+            "що питає в клієнта",
+            "що бот питає",
+        ]
+        return self._contains_any(normalized, markers)
+
+    def _get_client_questions_reply(self, language: str) -> str:
+        return (
+            "Залежить від бізнесу, але зазвичай бот може уточнити ім’я, телефон або email, "
+            "послугу чи запит, бажаний день і час, а також важливі деталі. Наприклад для СТО "
+            "це може бути марка авто, проблема і зручний час для візиту."
+        )
+
+    def _is_repair_price_query(self, normalized: str) -> bool:
+        markers = [
+            "ціни на ремонт",
+            "рахувати ремонт",
+            "вартість ремонту",
+            "порахувати ремонт",
+            "оцінити ремонт",
+        ]
+        return self._contains_any(normalized, markers)
+
+    def _get_repair_price_reply(self, language: str) -> str:
+        return (
+            "Точну вартість ремонту бот не має вигадувати. Він може дати орієнтир за вашими "
+            "правилами або зібрати деталі проблеми й передати заявку менеджеру для точної оцінки."
+        )
+
+    def _is_price_objection(self, normalized: str) -> bool:
+        markers = [
+            "це дорого",
+            "дорого",
+            "задорого",
+            "expensive",
+            "too expensive",
+        ]
+        return self._contains_any(normalized, markers)
+
+    def _get_price_objection_reply(self, language: str) -> str:
+        return (
+            "Розумію. Вартість залежить від обсягу сценарію, каналів і складності. Часто це "
+            "дешевше, ніж постійно обробляти типові повідомлення вручну або втрачати заявки; "
+            "можна почати з базового сценарію і розширювати поступово."
         )
 
     def _looks_like_question(self, normalized: str, original_text: str) -> bool:
@@ -550,6 +624,8 @@ class ReplyService:
             return "mid", "implementation_time_question"
         if self._is_guarantee_query(normalized):
             return "complex", "guarantee_or_legal_question"
+        if self._is_price_objection(normalized):
+            return "mid", "price_objection"
         if self._is_complex_query(normalized):
             return "complex", "complex_keywords_detected"
 
@@ -874,6 +950,13 @@ class ReplyService:
             return faq_answer
         return "Типовий запуск займає 7-10 днів, залежно від складності кейсу."
 
+    def get_buying_signal_reply(self, language: str) -> str:
+        return (
+            "Так, можемо допомогти з ботом для месенджерів. Він відповідатиме на типові "
+            "питання, збиратиме заявки і допомагатиме доводити клієнта до запису або дзвінка. "
+            "Можемо коротко обговорити ваш процес і підказати, що варто автоматизувати першим."
+        )
+
     def _get_niche_fit_reply(self, normalized: str, language: str) -> Optional[str]:
         niche_markers = {
             "dentistry": [
@@ -1062,6 +1145,15 @@ class ReplyService:
 
         if self._is_guarantee_query(normalized):
             return self._get_guarantee_reply(language)
+
+        if self._is_client_questions_query(normalized):
+            return self._get_client_questions_reply(language)
+
+        if self._is_repair_price_query(normalized):
+            return self._get_repair_price_reply(language)
+
+        if self._is_price_objection(normalized):
+            return self._get_price_objection_reply(language)
 
         if self._is_service_query(normalized) or self._is_mid_level_query(normalized):
             history = self.memory_service.get_history(message.sender_id)

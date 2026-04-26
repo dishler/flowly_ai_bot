@@ -600,10 +600,8 @@ async def test_booking_name_only_asks_for_contact(processor_factory):
     result = await processor.process(_message(text="Іван"))
 
     assert result["booking_result"]["status"] == "waiting_for_contact"
-    assert result["reply_text"] == (
-        "Дякую, ім’я зафіксував. А для підтвердження залиште, будь ласка, "
-        "контактний номер або email."
-    )
+    assert result["reply_text"] == "Дякую, Іван. А підкажіть, будь ласка, номер телефону або email?"
+    assert "ім’я зафіксував" not in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
 
 
@@ -828,6 +826,168 @@ async def test_booking_status_question_after_confirmation_does_not_start_new_boo
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
+async def test_product_question_during_waiting_for_contact_gets_answer_and_keeps_booking(processor_factory):
+    calendar_service = BusyAt13CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="гаразд мені цікаво"))
+    await processor.process(_message(text="давай завтра о 13"))
+    await processor.process(_message(text="так давай"))
+    result = await processor.process(_message(text="цікаво, як довго займає впроваадження?"))
+
+    assert result["intent"] == "booking_product_question"
+    assert "7-10 днів" in result["reply_text"]
+    assert "AI-бот для месенджерів" not in result["reply_text"]
+    assert "ваше ім’я та номер телефону або email" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+    pending = booking_service._get_pending_confirmation("user-1")
+    assert pending["customer_name"] is None
+
+
+async def test_interest_word_during_waiting_for_contact_is_not_saved_as_name(processor_factory):
+    calendar_service = BusyAt13CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="гаразд мені цікаво"))
+    await processor.process(_message(text="давай завтра о 13"))
+    await processor.process(_message(text="так давай"))
+    result = await processor.process(_message(text="цікаво"))
+
+    assert result["intent"] == "booking_flow"
+    assert result["booking_result"]["status"] == "waiting_for_contact"
+    assert "ім’я зафіксував" not in result["reply_text"]
+    pending = booking_service._get_pending_confirmation("user-1")
+    assert pending["customer_name"] is None
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_name_only_during_booking_asks_for_contact_with_name(processor_factory):
+    calendar_service = RecordingCreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="давайте кол"))
+    await processor.process(_message(text="завтра 12:00"))
+    result = await processor.process(_message(text="Дмитро"))
+
+    assert result["booking_result"]["status"] == "waiting_for_contact"
+    assert result["reply_text"] == "Дякую, Дмитро. А підкажіть, будь ласка, номер телефону або email?"
+    assert "ім’я зафіксував" not in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_CONTACT"
+
+
+async def test_availability_question_while_waiting_for_time_returns_slots(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="давайте кол"))
+    result = await processor.process(_message(text="коли є слоти?"))
+
+    assert result["intent"] == "booking_availability_question"
+    assert "завтра" in result["reply_text"]
+    assert "AI-бот для месенджерів" not in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("що бот буде питати в клієнта?", "ім’я"),
+        ("а ціни на ремонт він може рахувати?", "Точну вартість ремонту"),
+        ("це дорого", "можна почати з базового сценарію"),
+    ],
+)
+async def test_sales_edge_questions_get_specific_replies(processor_factory, text, expected):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text=text))
+
+    assert expected in result["reply_text"]
+    assert "уточнити деталі" not in result["reply_text"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("що бот буде питати в клієнта?", "ім’я"),
+        ("а ціни на ремонт він може рахувати?", "Точну вартість ремонту"),
+        ("а якщо в нас 3 філії і різні адміністратори?", "передавати заявку потрібному адміністратору"),
+    ],
+)
+async def test_sales_edge_questions_after_long_dialogue_still_get_specific_replies(
+    processor_factory,
+    text,
+    expected,
+):
+    processor, _ = processor_factory()
+
+    for setup_text in [
+        "Привіт",
+        "чим ви займаєтесь?",
+        "з якими напрямками працюєте?",
+        "для СТО підходить?",
+        "так підкажи, ми сто",
+        "ми стоматологія",
+    ]:
+        await processor.process(_message(text=setup_text))
+
+    result = await processor.process(_message(text=text))
+
+    assert expected in result["reply_text"]
+    assert "уточнити деталі" not in result["reply_text"]
+    assert "як працює бот, для яких бізнесів" not in result["reply_text"]
+
+
+async def test_confirmed_booking_datetime_followup_reschedules(processor_factory):
+    calendar_service = RecordingCreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="давайте кол"))
+    await processor.process(_message(text="завтра 12:00"))
+    await processor.process(_message(text="Дмитро 0987121329"))
+    await processor.process(_message(text="хочу перенести дзвінок"))
+    result = await processor.process(_message(text="післязавтра 15:00"))
+
+    assert result["intent"] == "booking_reschedule"
+    assert result["booking_result"]["status"] == "rescheduled"
+    assert "перенесли на післязавтра о 15:00" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_language_request_does_not_answer_in_russian(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="а можно на русском?"))
+
+    assert result["intent"] == "language_request"
+    assert result["reply_text"] == "Можу відповідати українською або англійською."
+
+
+async def test_harsh_ukrainian_slang_gets_frustrated_recovery(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="шо за херня"))
+
+    assert result["intent"] == "frustrated"
+    assert "відповідь була не зовсім по суті" in result["reply_text"]
+
+
+async def test_email_with_name_after_booking_product_question_confirms(processor_factory):
+    calendar_service = BusyAt13CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="гаразд мені цікаво"))
+    await processor.process(_message(text="давай завтра о 13"))
+    await processor.process(_message(text="так давай"))
+    await processor.process(_message(text="цікаво, як довго займає впроваадження?"))
+    await processor.process(_message(text="цікаво"))
+    result = await processor.process(_message(text="Дмитро dishler@gmail.com"))
+
+    assert result["booking_result"]["status"] == "confirmed"
+    assert result["booking_result"]["customer_name"] == "Дмитро"
+    assert result["booking_result"]["contact_email"] == "dishler@gmail.com"
+    assert "Дмитро" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
 async def test_service_question_for_whom(processor_factory):
     processor, _ = processor_factory()
 
@@ -887,6 +1047,47 @@ async def test_offer_question_routes_to_service_description_not_fallback(process
     assert "AI-бота" in result["reply_text"]
     assert "уточніть" not in result["reply_text"].lower()
     assert not ai_service.calls
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "привіт чим займається ваша компанія",
+        "привіт що ви робите",
+        "доброго дня, хочу зрозуміти що за бот",
+        "можете коротко пояснити ваш сервіс?",
+    ],
+)
+async def test_common_first_service_questions_do_not_use_ai_fallback(processor_factory, text):
+    ai_service = RecordingAIService()
+    processor, _ = processor_factory(ai_service=ai_service)
+
+    result = await processor.process(_message(text=text))
+
+    assert result["intent"] in {"service_description", "general_question"}
+    assert "AI fallback" not in result["reply_text"]
+    assert "уточніть" not in result["reply_text"].lower()
+    assert ("AI-бот" in result["reply_text"] or "AI-ботів" in result["reply_text"])
+    assert not ai_service.calls
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "привіт мені цікаве впровадження бота",
+        "потрібен бот для інстаграму",
+    ],
+)
+async def test_buying_signal_gets_sales_reply_not_channel_only_reply(processor_factory, text):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text=text))
+
+    assert result["intent"] == "buying_signal"
+    assert "можемо допомогти" in result["reply_text"].lower()
+    assert "що варто автоматизувати першим" in result["reply_text"]
+    assert "Зараз ми фокусуємось" not in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
 async def test_how_it_works_returns_process_reply_not_repeated_service_description(processor_factory):

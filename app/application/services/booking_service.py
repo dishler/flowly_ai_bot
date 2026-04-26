@@ -262,8 +262,13 @@ class BookingService:
     def _build_name_retry_reply(self, language: str) -> str:
         return "Дякую. А підкажіть, будь ласка, ваше ім’я?"
 
-    def _build_contact_only_retry_reply(self, language: str) -> str:
-        return "Дякую, ім’я зафіксував. А для підтвердження залиште, будь ласка, контактний номер або email."
+    def _build_contact_only_retry_reply(self, language: str, customer_name: str | None = None) -> str:
+        if customer_name:
+            return (
+                f"Дякую, {customer_name}. А підкажіть, будь ласка, "
+                "номер телефону або email?"
+            )
+        return "Щоб підтвердити дзвінок, залиште, будь ласка, номер телефону або email."
 
     def _build_booking_status_pending_contact_reply(self, language: str) -> str:
         return (
@@ -401,6 +406,25 @@ class BookingService:
             "has_name": bool(customer_name),
         }
 
+    def extract_contact_details(self, text: str) -> Dict[str, Any]:
+        return self._extract_contact_details(text)
+
+    def _is_non_customer_name_text(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        normalized = re.sub(r"([аеєиіїоуюя])\1+", r"\1", normalized)
+        non_names = {
+            "цікаво",
+            "гаразд цікаво",
+            "ок цікаво",
+            "окей цікаво",
+            "звучить цікаво",
+            "можливо цікаво",
+            "хм цікаво",
+            "так цікаво",
+        }
+        return normalized in non_names
+
     def _extract_customer_name(
         self,
         *,
@@ -409,6 +433,8 @@ class BookingService:
         phones: list[str],
     ) -> str | None:
         if self._is_confirmation_text(text):
+            return None
+        if self._is_non_customer_name_text(text):
             return None
 
         candidate = text.strip()
@@ -1310,7 +1336,7 @@ class BookingService:
                 self._save_pending_confirmation(sender_id, pending)
                 return {
                     "status": "waiting_for_contact",
-                    "reply_text": self._build_contact_only_retry_reply(language),
+                    "reply_text": self._build_contact_only_retry_reply(language, customer_name),
                     "event_created": False,
                     "requires_contact": True,
                     "booking_state": BookingState.WAITING_FOR_CONTACT.value,

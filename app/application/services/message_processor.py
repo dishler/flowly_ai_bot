@@ -250,6 +250,96 @@ class MessageProcessor:
         ]
         return any(marker in normalized for marker in markers)
 
+    def _normalize_for_conversation_matching(self, text: str) -> str:
+        normalized = " ".join(text.strip().lower().split())
+        return re.sub(r"([аеєиіїоуюя])\1+", r"\1", normalized)
+
+    def _looks_like_language_request(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "можно на русском",
+            "можете на русском",
+            "на русском",
+            "російською",
+            "по русски",
+            "по-русски",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _looks_like_product_question_during_booking(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        product_markers = [
+            "що ви пропонуєте",
+            "що ви робите",
+            "що робить",
+            "як це працює",
+            "для кого",
+            "кому підходить",
+            "з якими напрям",
+            "з якими бізнес",
+            "скільки коштує",
+            "ціна",
+            "вартість",
+            "кейси",
+            "приклади",
+            "канали",
+            "instagram",
+            "facebook",
+            "whatsapp",
+            "telegram",
+            "вночі",
+            "ніч",
+            "впроваджен",
+            "запуск",
+            "як довго",
+            "скільки часу",
+            "термін",
+            "гаранті",
+            "crm",
+            "інтеграц",
+            "що бот буде питати",
+            "що буде питати",
+            "ціни на ремонт",
+            "рахувати ремонт",
+            "це дорого",
+        ]
+        return any(marker in normalized for marker in product_markers)
+
+    def _looks_like_buying_signal(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        bot_markers = [
+            "потрібен бот",
+            "потрібний бот",
+            "треба бот",
+            "хочу бот",
+            "цікаве впровадження бота",
+            "цікавить впровадження бота",
+            "бот для інстаграм",
+            "бот в інстаграм",
+            "бот для instagram",
+            "бот в instagram",
+        ]
+        return any(marker in normalized for marker in bot_markers)
+
+    def _build_booking_product_question_reply(
+        self,
+        *,
+        message: NormalizedMessage,
+        booking_state: BookingState,
+    ) -> str:
+        normalized = self._normalize_for_conversation_matching(message.user_message)
+        intent = self.intent_service.detect_intent(message.user_message)
+        if any(marker in normalized for marker in ["впроваджен", "запуск", "як довго", "скільки часу", "термін"]):
+            intent = IntentType.GENERAL_QUESTION
+
+        reply_text = self.reply_service.generate_reply(message, intent=intent)
+        if booking_state == BookingState.WAITING_FOR_CONTACT:
+            reply_text = (
+                f"{reply_text}\n\n"
+                "А для підтвердження дзвінка залиште, будь ласка, ваше ім’я та номер телефону або email."
+            )
+        return reply_text
+
     def _build_booking_reply_result(
         self,
         *,
@@ -525,11 +615,15 @@ class MessageProcessor:
             )
 
         if self._looks_like_datetime_only_message(message.user_message):
-            reply_text = self.booking_service.get_reschedule_reply(language)
+            booking_result = self.booking_service.handle_reschedule_request(
+                sender_id=message.sender_id,
+                message_text=message.user_message,
+            )
             return self._build_booking_reply_result(
                 message=message,
-                reply_text=reply_text,
-                intent_value="post_booking_reschedule_prompt",
+                reply_text=booking_result["reply_text"],
+                intent_value="booking_reschedule",
+                booking_result=booking_result,
             )
 
         if self.booking_service.looks_like_booking_status_question(message.user_message):
@@ -666,6 +760,42 @@ class MessageProcessor:
         logger.info("Booking state: %s", booking_state.value)
 
         if booking_state != BookingState.NONE:
+            if (
+                booking_state == BookingState.WAITING_FOR_TIME
+                and self._looks_like_availability_question(message.user_message)
+            ):
+                booking_result = self.booking_service.handle_availability_question(
+                    sender_id=message.sender_id,
+                    message_text=message.user_message,
+                    source_channel=message.platform,
+                )
+                return self._build_booking_reply_result(
+                    message=message,
+                    reply_text=booking_result["reply_text"],
+                    intent_value="booking_availability_question",
+                    booking_result=booking_result,
+                )
+
+            if booking_state == BookingState.WAITING_FOR_CONTACT:
+                contact_details = self.booking_service.extract_contact_details(message.user_message)
+                if (
+                    not contact_details["has_name"]
+                    and not contact_details["has_phone"]
+                    and not contact_details["has_email"]
+                    and self._looks_like_product_question_during_booking(message.user_message)
+                ):
+                    reply_text = self._build_booking_product_question_reply(
+                        message=message,
+                        booking_state=booking_state,
+                    )
+                    return self._build_direct_reply_result(
+                        message=message,
+                        reply_text=reply_text,
+                        intent_value="booking_product_question",
+                        routing_category="answered_basic",
+                        intent_for_policy=IntentType.GENERAL_QUESTION,
+                    )
+
             booking_result = self.booking_service.process_booking_message(
                 sender_id=message.sender_id,
                 message_text=message.user_message,
@@ -710,6 +840,16 @@ class MessageProcessor:
             confirmed_result = self._handle_confirmed_booking_message(message)
             if confirmed_result is not None:
                 return confirmed_result
+
+        if self._looks_like_language_request(message.user_message):
+            language = self.reply_service.detect_user_language(message.user_message)
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.get_language_request_reply(language),
+                intent_value="language_request",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
 
         if self._looks_like_availability_question(message.user_message):
             booking_result = self.booking_service.handle_availability_question(
@@ -756,6 +896,16 @@ class MessageProcessor:
                 reply_text=booking_result["reply_text"],
                 intent_value="booking_request",
                 booking_result=booking_result,
+            )
+
+        if self._looks_like_buying_signal(message.user_message):
+            language = self.reply_service.detect_user_language(message.user_message)
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.get_buying_signal_reply(language),
+                intent_value="buying_signal",
+                routing_category="consultation_cta",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
         if (
