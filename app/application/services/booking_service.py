@@ -127,8 +127,8 @@ class BookingService:
         normalized = " ".join(text.strip().lower().split())
         confirmations = {
             "yes", "y", "yeah", "yep", "sure", "ok", "okay", "confirm",
-            "так", "та", "ага", "добре", "ок", "підтверджую", "підтвердити",
-            "підходить", "так гуд", "good", "fine",
+            "так", "та", "ага", "добре", "ок", "окей", "підтверджую", "підтвердити",
+            "підходить", "піідходить", "підходе", "так гуд", "good", "fine",
         }
         return normalized in confirmations
 

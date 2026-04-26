@@ -20,6 +20,7 @@ _STANDARD_SALES_INTENTS = frozenset(
         IntentType.PRICE,
         IntentType.CHANNELS,
         IntentType.SERVICE_DESCRIPTION,
+        IntentType.USE_CASES,
         IntentType.INTEREST_SIGNAL,
         IntentType.BOOKING_REQUEST,
         IntentType.CONSULTATION_INTEREST,

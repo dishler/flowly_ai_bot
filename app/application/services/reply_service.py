@@ -53,6 +53,8 @@ class ReplyService:
                 return "Стартуємо від 200$, а точна сума залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
             if intent == IntentType.CHANNELS:
                 return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
+            if intent == IntentType.USE_CASES:
+                return self._get_use_cases_reply(language)
             if intent == IntentType.SERVICE_DESCRIPTION:
                 return self._get_service_description_fallback_reply(language)
             if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
@@ -63,6 +65,8 @@ class ReplyService:
             return "Вартість стартує від 200$, але залежить від задач і каналів. Можемо швидко глянути ваш кейс і зрозуміти, який формат має сенс."
         if intent == IntentType.CHANNELS:
             return "Працюємо з Instagram, Facebook, WhatsApp і Telegram. Найчастіше починаємо з каналу, де вже є найбільше звернень, а далі підключаємо інші."
+        if intent == IntentType.USE_CASES:
+            return self._get_use_cases_reply(language)
         if intent == IntentType.SERVICE_DESCRIPTION:
             return self._get_service_description_fallback_reply(language)
         if intent in {IntentType.BOOKING_REQUEST, IntentType.CONSULTATION_INTEREST}:
@@ -250,6 +254,54 @@ class ReplyService:
             "як це може працювати саме у вас. Зручно буде на дзвінок?"
         )
 
+    def _get_use_cases_reply(self, language: str) -> str:
+        return (
+            "Можемо показати типові use cases для різних бізнесів.\n\n"
+            "Наприклад:\n"
+            "— стоматологічна клініка: бот відповідає на питання про послуги, ціни, "
+            "графік і допомагає записати клієнта на консультацію\n"
+            "— СТО / автосервіс: бот приймає звернення, уточнює проблему з авто і "
+            "передає заявку менеджеру\n"
+            "— салон краси: бот відповідає на типові питання і допомагає записати "
+            "клієнта до майстра\n"
+            "— освітній проєкт: бот кваліфікує заявку перед консультацією або продажем курсу\n\n"
+            "Але краще розібрати саме ваш процес на короткому дзвінку — тоді покажемо, "
+            "як це може працювати у вашому бізнесі."
+        )
+
+    def _get_ai_fallback_reply(self, text: str, language: str) -> Optional[str]:
+        if self.ai_service is None:
+            return None
+
+        system_instruction = (
+            "Ти менеджер Flowly Agency.\n"
+            "Відповідай коротко, природно, як у DM.\n"
+            "Не вигадуй можливості.\n"
+            "Не відповідай російською.\n"
+            "Якщо питання складне — коротко поясни і запропонуй дзвінок."
+        )
+
+        try:
+            ai_result = self.ai_service.try_generate_reply(
+                user_message=text,
+                history=[],
+                grounding_context=None,
+                system_instruction=system_instruction,
+            )
+        except TypeError:
+            ai_result = self.ai_service.try_generate_reply(
+                user_message=text,
+                history=[],
+            )
+        except Exception:
+            logger.exception("AI fallback failed")
+            return None
+
+        ai_reply_text = ai_result.get("reply_text") if isinstance(ai_result, dict) else None
+        if ai_reply_text:
+            return str(ai_reply_text)
+        return None
+
     def _is_price_query(self, normalized: str) -> bool:
         price_markers = [
             "price",
@@ -372,6 +424,7 @@ class ReplyService:
             IntentType.PRICE,
             IntentType.CHANNELS,
             IntentType.SERVICE_DESCRIPTION,
+            IntentType.USE_CASES,
         }
         if intent in basic_intents:
             return "basic", intent.value
@@ -827,6 +880,9 @@ class ReplyService:
                 return channel_reply
             return self._fallback_for_intent(IntentType.CHANNELS, language)
 
+        if resolved_intent == IntentType.USE_CASES:
+            return self._get_use_cases_reply(language)
+
         if resolved_intent == IntentType.SERVICE_DESCRIPTION:
             return self._get_service_description_fallback_reply(language, text)
 
@@ -850,6 +906,10 @@ class ReplyService:
                 history=history,
                 language=language,
             )
+
+        ai_reply = self._get_ai_fallback_reply(text, language)
+        if ai_reply:
+            return ai_reply
 
         # Unknown intent fallback only.
         return self._fallback_for_intent(IntentType.SERVICE_DESCRIPTION, language)

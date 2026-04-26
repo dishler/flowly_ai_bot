@@ -51,6 +51,31 @@ class DummySpeechService:
         return self.transcript
 
 
+class RecordingAIService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def try_generate_reply(
+        self,
+        user_message: str,
+        history=None,
+        grounding_context=None,
+        system_instruction=None,
+    ) -> dict:
+        self.calls.append(
+            {
+                "user_message": user_message,
+                "history": history,
+                "grounding_context": grounding_context,
+                "system_instruction": system_instruction,
+            }
+        )
+        return {
+            "used_ai": True,
+            "reply_text": "AI fallback reply: коротко поясню і запропоную дзвінок.",
+        }
+
+
 class RecordingCalendarService(CalendarService):
     def __init__(self) -> None:
         super().__init__()
@@ -133,14 +158,18 @@ class BusyUntil1430CreateCalendarService(RecordingCreateCalendarService):
 
 @pytest.fixture
 def processor_factory():
-    def build(transcript: str = "", calendar_service: CalendarService | None = None):
+    def build(
+        transcript: str = "",
+        calendar_service: CalendarService | None = None,
+        ai_service=None,
+    ):
         memory_service = MemoryService()
         booking_service = BookingService(
             calendar_service=calendar_service or CalendarService(),
             language_service=LanguageService(),
         )
         reply_service = ReplyService(
-            ai_service=None,
+            ai_service=ai_service,
             memory_service=memory_service,
             knowledge_service=None,
         )
@@ -708,6 +737,19 @@ async def test_suggested_slot_acceptance_phone_then_name_confirms_with_calendar(
     assert len(calendar_service.created_events) == 1
 
 
+async def test_typo_confirmation_after_suggested_slot_is_not_customer_name(processor_factory):
+    calendar_service = BusyUntil1430CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="Давайте дзвінок"))
+    await processor.process(_message(text="Завтра 12:30"))
+    accepted = await processor.process(_message(text="піідходить"))
+
+    assert accepted["booking_result"]["status"] == "waiting_for_contact"
+    pending = booking_service._get_pending_confirmation("user-1")
+    assert pending["customer_name"] is None
+
+
 async def test_service_question_for_whom(processor_factory):
     processor, _ = processor_factory()
 
@@ -788,3 +830,44 @@ async def test_interest_signal_acceptance_starts_booking_time_prompt(processor_f
     assert result["booking_result"]["status"] == "waiting_for_time"
     assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_use_cases_reply_contains_dental_clinic(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="А є якісь кейси?"))
+
+    assert result["intent"] == "use_cases"
+    assert "стоматологічна клініка" in result["reply_text"]
+
+
+async def test_use_cases_reply_avoids_generic_and_fake_claims(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="Покажіть кейси"))
+
+    assert result["intent"] == "use_cases"
+    assert "це можна налаштувати" not in result["reply_text"]
+    assert "вже впроваджували" not in result["reply_text"]
+
+
+async def test_interest_signal_does_not_start_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text="ок цікаво"))
+
+    assert result["intent"] == "interest_signal"
+    assert result["booking_result"] is None
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_unknown_question_uses_ai_fallback(processor_factory):
+    ai_service = RecordingAIService()
+    processor, _ = processor_factory(ai_service=ai_service)
+
+    result = await processor.process(_message(text="Чи можна зробити щось нестандартне під мою команду?"))
+
+    assert result["intent"] == "general_question"
+    assert result["reply_text"].endswith("AI fallback reply: коротко поясню і запропоную дзвінок.")
+    assert ai_service.calls
+    assert "Ти менеджер Flowly Agency" in ai_service.calls[0]["system_instruction"]

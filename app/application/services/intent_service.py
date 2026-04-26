@@ -94,6 +94,23 @@ class IntentService:
             "what does the service include",
         ]
 
+        use_case_markers = [
+            "а є якісь кейси",
+            "є якісь кейси",
+            "є кейси",
+            "кейси",
+            "покажіть кейси",
+            "покажи кейси",
+            "є приклади впроваджень",
+            "приклади впроваджень",
+            "які є приклади",
+            "приклади",
+            "для кого це працює",
+            "use cases",
+            "case studies",
+            "examples",
+        ]
+
         booking_markers = [
             "консультація",
             "дзвінок",
@@ -120,11 +137,13 @@ class IntentService:
             "хм, цікаво",
         ]
 
-        # Priority: PRICE > CHANNELS > SERVICE_DESCRIPTION > INTEREST > BOOKING > FALLBACK
+        # Priority: PRICE > CHANNELS > USE_CASES > SERVICE_DESCRIPTION > INTEREST > BOOKING > FALLBACK
         if any(marker in normalized for marker in price_markers):
             intent = IntentType.PRICE
         elif any(marker in normalized for marker in channel_markers):
             intent = IntentType.CHANNELS
+        elif any(marker in normalized for marker in use_case_markers):
+            intent = IntentType.USE_CASES
         elif any(marker in normalized for marker in service_markers):
             intent = IntentType.SERVICE_DESCRIPTION
         elif any(marker in normalized for marker in interest_markers):

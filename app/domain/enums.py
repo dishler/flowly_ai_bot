@@ -5,6 +5,7 @@ class IntentType(str, Enum):
     PRICE = "price"
     CHANNELS = "channels"
     SERVICE_DESCRIPTION = "service_description"
+    USE_CASES = "use_cases"
     INTEREST_SIGNAL = "interest_signal"
     CONSULTATION_INTEREST = "consultation_interest"
     BOOKING_REQUEST = "booking_request"
