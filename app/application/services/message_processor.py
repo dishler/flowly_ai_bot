@@ -266,6 +266,12 @@ class MessageProcessor:
         ]
         return any(marker in normalized for marker in markers)
 
+    def _looks_like_noise_only_message(self, text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return True
+        return not bool(re.search(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9]", stripped))
+
     def _looks_like_product_question_during_booking(self, text: str) -> bool:
         normalized = self._normalize_for_conversation_matching(text)
         product_markers = [
@@ -283,6 +289,9 @@ class MessageProcessor:
             "кейси",
             "приклади",
             "канали",
+            "бот",
+            "інстаграм",
+            "телеграм",
             "instagram",
             "facebook",
             "whatsapp",
@@ -302,6 +311,7 @@ class MessageProcessor:
             "ціни на ремонт",
             "рахувати ремонт",
             "це дорого",
+            "дорого",
         ]
         return any(marker in normalized for marker in product_markers)
 
@@ -314,10 +324,15 @@ class MessageProcessor:
             "хочу бот",
             "цікаве впровадження бота",
             "цікавить впровадження бота",
+            "цікавить бот",
             "бот для інстаграм",
             "бот в інстаграм",
             "бот для instagram",
             "бот в instagram",
+            "бот для телеграм",
+            "бот в телеграм",
+            "бот для telegram",
+            "бот в telegram",
         ]
         return any(marker in normalized for marker in bot_markers)
 
@@ -338,6 +353,11 @@ class MessageProcessor:
                 f"{reply_text}\n\n"
                 "А для підтвердження дзвінка залиште, будь ласка, ваше ім’я та номер телефону або email."
             )
+        elif booking_state == BookingState.WAITING_FOR_TIME:
+            reply_text = (
+                f"{reply_text}\n\n"
+                "Для дзвінка підкажіть, будь ласка, який день і час вам зручний."
+            )
         return reply_text
 
     def _build_booking_reply_result(
@@ -353,6 +373,7 @@ class MessageProcessor:
             user_text=message.user_message,
             intent=IntentType.BOOKING_REQUEST,
         )
+        reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
         outbound_result = self.outbound_service.send_reply(
             platform=message.platform,
@@ -382,6 +403,7 @@ class MessageProcessor:
             user_text=message.user_message,
             intent=intent_for_policy,
         )
+        reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
         outbound_result = self.outbound_service.send_reply(
             platform=message.platform,
@@ -419,6 +441,48 @@ class MessageProcessor:
         }
         return replies.get(normalized)
 
+    def _get_last_assistant_message(self, sender_id: str) -> str | None:
+        for item in reversed(self.memory_service.get_history(sender_id)):
+            if item.startswith("assistant:"):
+                return item.removeprefix("assistant:").strip()
+        return None
+
+    def _avoid_exact_repeat(self, sender_id: str, reply_text: str) -> str:
+        last_reply = self._get_last_assistant_message(sender_id)
+        if last_reply != reply_text:
+            return reply_text
+
+        if reply_text == "Підкажіть, будь ласка, точний день і час.":
+            return "Так, давайте. Напишіть, будь ласка, конкретний день і час, наприклад завтра о 12:30."
+
+        if reply_text.startswith("Супер, тоді бронюємо") and "Залиште, будь ласка" in reply_text:
+            return "Так, цей варіант підходить. Залиште, будь ласка, ваше ім’я та номер телефону або email."
+
+        if reply_text == "Добре, зрозумів.":
+            return "Все ок, не турбую."
+
+        if reply_text.startswith("Розумію, відповідь була не зовсім по суті."):
+            return (
+                "Бачу, попередня відповідь не зайшла. Можу коротко відповісти по суті: "
+                "що робить бот, для яких сфер підходить або скільки коштує."
+            )
+
+        if reply_text.startswith("Можете трохи уточнити"):
+            return (
+                "Не зовсім зрозумів повідомлення. Напишіть, будь ласка, одним реченням: "
+                "цікавить ціна, канали, сфера бізнесу чи запис на дзвінок?"
+            )
+
+        if reply_text.startswith("Можемо показати типові use cases"):
+            return (
+                "Так, приклади тут радше типові сценарії, без вигаданих реальних кейсів. "
+                "Для СТО бот приймає звернення й уточнює проблему з авто, для стоматології "
+                "допомагає із записом, для салону веде клієнта до майстра, а для освіти "
+                "кваліфікує заявку перед консультацією."
+            )
+
+        return reply_text
+
     def _has_recent_interest_signal_reply(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
         previous_items = history[:-1]
@@ -438,9 +502,10 @@ class MessageProcessor:
             "якщо вам ок",
             "якщо вам ок.",
             "коротко обговорити на дзвінку",
-            "коротко прикинути сценарій",
             "розглянути ваш кейс на дзвінку",
             "на дзвінку і поспілкуватися",
+            "зі спеціалістом на дзвінку",
+            "розібрати ваш процес зі спеціалістом",
         ]
         for item in reversed(previous_items[-4:]):
             if not item.startswith("assistant:"):
@@ -464,10 +529,12 @@ class MessageProcessor:
     def _looks_like_interest_booking_acceptance(self, text: str) -> bool:
         normalized = " ".join(text.strip().lower().split())
         normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        normalized = re.sub(r"([аеєиіїоуюя])\1+", r"\1", normalized)
         normalized = normalized.replace(",", " ")
         normalized = " ".join(normalized.split())
         acceptances = {
             "так",
+            "так підкажи",
             "так ок",
             "так окк",
             "так окей",
@@ -476,6 +543,8 @@ class MessageProcessor:
             "ок",
             "окк",
             "окей",
+            "ну ок",
+            "ну окей",
             "добре",
             "можна",
             "yes",
@@ -483,7 +552,12 @@ class MessageProcessor:
             "okay",
             "sure",
         }
-        return normalized in acceptances
+        if normalized in acceptances:
+            return True
+        if "сценар" in normalized:
+            acceptance_markers = ["так", "давай", "давайте", "ок", "окей", "ну ок", "добре"]
+            return any(marker in normalized for marker in acceptance_markers)
+        return False
 
     def _has_recent_intro_offer(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
@@ -764,6 +838,22 @@ class MessageProcessor:
         if booking_state != BookingState.NONE:
             if (
                 booking_state == BookingState.WAITING_FOR_TIME
+                and self._looks_like_product_question_during_booking(message.user_message)
+            ):
+                reply_text = self._build_booking_product_question_reply(
+                    message=message,
+                    booking_state=booking_state,
+                )
+                return self._build_direct_reply_result(
+                    message=message,
+                    reply_text=reply_text,
+                    intent_value="booking_product_question",
+                    routing_category="answered_basic",
+                    intent_for_policy=IntentType.GENERAL_QUESTION,
+                )
+
+            if (
+                booking_state == BookingState.WAITING_FOR_TIME
                 and self._looks_like_availability_question(message.user_message)
             ):
                 booking_result = self.booking_service.handle_availability_question(
@@ -816,6 +906,7 @@ class MessageProcessor:
                 user_text=message.user_message,
                 intent=IntentType.BOOKING_REQUEST,
             )
+            reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
             logger.info("Reply after guard: %s", reply_text)
 
             self.memory_service.add_assistant_message(message.sender_id, reply_text)
@@ -850,6 +941,16 @@ class MessageProcessor:
                 reply_text=self.reply_service.get_language_request_reply(language),
                 intent_value="language_request",
                 routing_category="answered_basic",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
+        if self._looks_like_noise_only_message(message.user_message):
+            language = self.reply_service.detect_user_language(message.user_message)
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.get_safe_fallback_reply(language),
+                intent_value="general_question",
+                routing_category="safe_handoff",
                 intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
@@ -1055,6 +1156,7 @@ class MessageProcessor:
             user_text=message.user_message,
             intent=intent,
         )
+        reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
         if booking_result is None and routing_category != "safe_handoff":
             reply_text = self._finalize_general_reply_text(
                 sender_id=message.sender_id,

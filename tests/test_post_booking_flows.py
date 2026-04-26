@@ -159,6 +159,11 @@ class BusyAt13CreateCalendarService(RecordingCreateCalendarService):
         )
 
 
+class BusyAt19CreateCalendarService(RecordingCreateCalendarService):
+    def check_specific_time_availability(self, start_dt, duration_minutes: int = 30) -> bool:
+        return not (start_dt.hour == 19 and start_dt.minute == 0)
+
+
 class BusyUntil1430CreateCalendarService(RecordingCreateCalendarService):
     def check_specific_time_availability(self, start_dt, duration_minutes: int = 30) -> bool:
         return not (
@@ -476,8 +481,8 @@ async def test_active_waiting_for_time_stays_in_booking_for_unrelated_question(p
     price_result = await processor.process(_message(text="вітаю, скільки коштує бот?"))
 
     assert start_result["booking_result"]["booking_state"] == "WAITING_FOR_TIME"
-    assert price_result["intent"] == "booking_flow"
-    assert price_result["booking_result"]["status"] == "booking_unrelated_question"
+    assert price_result["intent"] == "booking_product_question"
+    assert "Вартість стартує від 200$" in price_result["reply_text"]
     assert "Для дзвінка підкажіть" in price_result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
@@ -925,6 +930,66 @@ async def test_price_objection_rejection_does_not_start_booking(processor_factor
 
     assert result["intent"] == "rejection"
     assert "Зрозумів, дякую" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_niche_reply_does_not_promise_chat_scenario_and_scenario_acceptance_starts_booking(
+    processor_factory,
+):
+    processor, booking_service = processor_factory()
+
+    niche = await processor.process(_message(text="в мене сто"))
+    accepted = await processor.process(_message(text="так даавай сценаарій під наш сервіс"))
+
+    assert "прикинути сценарій" not in niche["reply_text"]
+    assert "сценарій у чаті" in niche["reply_text"]
+    assert "спеціалістом на дзвінку" in niche["reply_text"]
+    assert accepted["intent"] == "booking_request"
+    assert accepted["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_channel_buying_signal_gets_sales_reply_not_channel_only(processor_factory):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text="цікавить бот для телеграм і інстаграм"))
+
+    assert result["intent"] == "buying_signal"
+    assert "можемо допомогти" in result["reply_text"].lower()
+    assert "Зараз ми фокусуємось" not in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_exact_final_dialogue_flow_from_auto_service_to_confirmed_call(processor_factory):
+    calendar_service = BusyAt19CreateCalendarService()
+    processor, booking_service = processor_factory(calendar_service=calendar_service)
+
+    await processor.process(_message(text="хай, що ви пропонуєте?"))
+    niche = await processor.process(_message(text="в мене сто"))
+    scenario_acceptance = await processor.process(_message(text="так даавай сценаарій під наш сервіс"))
+    channel_interest = await processor.process(_message(text="цікавить бот для телеграм і інстаграм"))
+    price = await processor.process(_message(text="гаразд скільки коштує"))
+    objection = await processor.process(_message(text="дорого"))
+    accepted = await processor.process(_message(text="ну ок"))
+    requested = await processor.process(_message(text="завтра о 19"))
+    slot_accepted = await processor.process(_message(text="давай"))
+    confirmed = await processor.process(_message(text="Діма, 0987121322"))
+
+    assert "прикинути сценарій" not in niche["reply_text"]
+    assert scenario_acceptance["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert channel_interest["intent"] == "booking_product_question"
+    assert "Для дзвінка підкажіть" in channel_interest["reply_text"]
+    assert price["intent"] == "booking_product_question"
+    assert "Вартість стартує від 200$" in price["reply_text"]
+    assert "розглянути ваш кейс на дзвінку" in objection["reply_text"]
+    assert accepted["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert requested["booking_result"]["status"] == "slot_suggested"
+    assert "завтра о 20:00" in requested["reply_text"]
+    assert slot_accepted["booking_result"]["status"] == "waiting_for_contact"
+    assert confirmed["booking_result"]["status"] == "confirmed"
+    assert confirmed["booking_result"]["customer_name"] == "Діма"
+    assert confirmed["booking_result"]["contact_phone"] == "0987121322"
+    assert "Супер, Діма" in confirmed["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
@@ -1433,3 +1498,44 @@ async def test_russian_input_does_not_produce_russian_output(processor_factory):
     assert result["intent"] == "price"
     assert "сколько" not in result["reply_text"].lower()
     assert "стоит" not in result["reply_text"].lower()
+
+
+async def test_soft_call_cta_accepts_tak_pidkazhy_as_booking_start(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="ми сто"))
+    result = await processor.process(_message(text="так підкажи"))
+
+    assert result["intent"] == "booking_request"
+    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_repair_price_wording_gets_specific_reply(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="а бот може рахувати ціну ремонту?"))
+
+    assert "Точну вартість ремонту" in result["reply_text"]
+    assert "не має вигадувати" in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_question_marks_only_get_safe_ukrainian_clarification(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="?????"))
+
+    assert "Можете трохи уточнити" in result["reply_text"]
+    assert "We set up" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
+
+
+async def test_branch_routing_reply_does_not_use_forbidden_setup_phrase(processor_factory):
+    processor, _ = processor_factory()
+
+    result = await processor.process(_message(text="а якщо у нас 3 філії?"))
+
+    assert "логікою маршрутизації" in result["reply_text"]
+    assert "Так, це можна налаштувати" not in result["reply_text"]
+    assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
