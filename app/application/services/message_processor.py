@@ -25,6 +25,7 @@ _STANDARD_SALES_INTENTS = frozenset(
         IntentType.INTEREST_SIGNAL,
         IntentType.REJECTION,
         IntentType.FRUSTRATED,
+        IntentType.AGGRESSIVE_OBJECTION,
         IntentType.HESITATION,
         IntentType.BUYING_SIGNAL,
         IntentType.START_REQUIREMENTS,
@@ -494,7 +495,10 @@ class MessageProcessor:
         if cta_mode != "soft_cta":
             return reply_text
         if "CRM" in reply_text:
-            cta = "Можемо прикинути під ваш кейс, якщо напишете, яку CRM використовуєте."
+            cta = (
+                "Тут уже краще коротко розібрати ваш кейс зі спеціалістом, щоб не відповідати "
+                "загально. Можемо підібрати мінімальний сценарій під ваші канали й процес."
+            )
         elif "календар" in reply_text.lower():
             cta = "Можемо розкласти під ваш процес, щоб не ламати ваші правила запису."
         elif "Telegram" in reply_text:
@@ -502,7 +506,10 @@ class MessageProcessor:
         elif "Viber" in reply_text:
             cta = "Можемо глянути, як це у вас виглядатиме, якщо Viber справді дає заявки."
         elif "вночі" in reply_text.lower() or "нечітко" in reply_text.lower():
-            cta = "Можемо глянути, як це у вас виглядатиме в реальних діалогах."
+            cta = (
+                "Тут уже краще коротко розібрати ваш кейс зі спеціалістом, щоб не відповідати "
+                "загально. Можемо підібрати мінімальний сценарій під ваші канали й процес."
+            )
         else:
             cta = "Можемо прикинути під ваш кейс і зрозуміти, що варто автоматизувати першим."
         return (
@@ -1035,6 +1042,8 @@ class MessageProcessor:
             "на дзвінку і поспілкуватися",
             "зі спеціалістом на дзвінку",
             "розібрати ваш процес зі спеціалістом",
+            "розібрати ваш кейс зі спеціалістом",
+            "мінімальний сценарій під ваші канали",
             "коротко розібрати ваш процес",
             "підказати, як це краще автоматизувати",
         ]
@@ -1837,6 +1846,15 @@ class MessageProcessor:
                 intent_value=intent_value,
                 routing_category="answered_basic",
                 intent_for_policy=IntentType.FRUSTRATED,
+            )
+
+        if intent == IntentType.AGGRESSIVE_OBJECTION:
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self.reply_service.generate_reply(message, intent=intent),
+                intent_value=intent_value,
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.AGGRESSIVE_OBJECTION,
             )
 
         history = self.memory_service.get_history(message.sender_id)

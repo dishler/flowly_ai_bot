@@ -176,7 +176,10 @@ class BookingService:
         return normalized in rejections or any(marker in normalized for marker in rejection_markers)
 
     def _build_unclear_time_reply(self, language: str) -> str:
-        return "Підкажіть, будь ласка, точний день і час."
+        return (
+            "Супер, тоді можемо коротко розібрати ваш кейс зі спеціалістом. "
+            "Напишіть, будь ласка, який день і приблизний час вам зручний?"
+        )
 
     def _build_unavailable_reply(self, language: str) -> str:
         slots = self.calendar_service.get_available_slots(language)

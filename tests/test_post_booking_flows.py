@@ -975,7 +975,8 @@ async def test_niche_reply_does_not_promise_chat_scenario_and_scenario_acceptanc
     assert "сценарій у чаті" in niche["reply_text"]
     assert "спеціалістом на дзвінку" in niche["reply_text"]
     assert accepted["intent"] == "booking_request"
-    assert accepted["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in accepted["reply_text"]
+    assert "день" in accepted["reply_text"] and "час" in accepted["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1006,13 +1007,15 @@ async def test_exact_final_dialogue_flow_from_auto_service_to_confirmed_call(pro
     confirmed = await processor.process(_message(text="Діма, 0987121322"))
 
     assert "прикинути сценарій" not in niche["reply_text"]
-    assert scenario_acceptance["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in scenario_acceptance["reply_text"]
+    assert "день" in scenario_acceptance["reply_text"] and "час" in scenario_acceptance["reply_text"]
     assert channel_interest["intent"] == "booking_product_question"
     assert "Для дзвінка підкажіть" in channel_interest["reply_text"]
     assert price["intent"] == "booking_product_question"
     assert "старт від 200$" in price["reply_text"]
     assert "мінімального сценарію" in objection["reply_text"]
-    assert accepted["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in accepted["reply_text"]
+    assert "день" in accepted["reply_text"] and "час" in accepted["reply_text"]
     assert requested["booking_result"]["status"] == "slot_suggested"
     assert "завтра о 20:00" in requested["reply_text"]
     assert slot_accepted["booking_result"]["status"] == "waiting_for_contact"
@@ -1410,7 +1413,8 @@ async def test_soft_call_cta_acceptance_with_typo_starts_booking(processor_facto
 
     assert result["intent"] == "booking_request"
     assert result["booking_result"]["status"] == "waiting_for_time"
-    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in result["reply_text"]
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1421,7 +1425,8 @@ async def test_typo_call_request_with_col_starts_booking_time_prompt(processor_f
 
     assert result["intent"] == "booking_request"
     assert result["booking_result"]["status"] == "waiting_for_time"
-    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in result["reply_text"]
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1433,7 +1438,8 @@ async def test_explicit_consultation_and_booking_words_start_booking(processor_f
 
     assert result["intent"] == "booking_request"
     assert result["booking_result"]["status"] == "waiting_for_time"
-    assert "Підкажіть" in result["reply_text"]
+    assert "спеціалістом" in result["reply_text"]
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1444,7 +1450,8 @@ async def test_stuck_key_call_request_with_col_starts_booking_time_prompt(proces
 
     assert result["intent"] == "booking_request"
     assert result["booking_result"]["status"] == "waiting_for_time"
-    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in result["reply_text"]
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1647,7 +1654,8 @@ async def test_soft_call_cta_accepts_tak_pidkazhy_as_booking_start(processor_fac
     result = await processor.process(_message(text="так підкажи"))
 
     assert result["intent"] == "booking_request"
-    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in result["reply_text"]
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1698,9 +1706,11 @@ async def test_price_and_call_typos_after_niche_reply_do_not_fallback(processor_
     assert accepted["intent"] == "contextual_short_reply"
     assert "який у вас бізнес" in accepted["reply_text"]
     assert typo_call["intent"] == "booking_request"
-    assert "точний день і час" in typo_call["reply_text"]
+    assert "спеціалістом" in typo_call["reply_text"]
+    assert "день" in typo_call["reply_text"] and "час" in typo_call["reply_text"]
     assert call["intent"] == "booking_flow"
-    assert "Підкажіть" in call["reply_text"] or "конкретний день і час" in call["reply_text"]
+    assert "спеціалістом" in call["reply_text"]
+    assert "день" in call["reply_text"] and "час" in call["reply_text"]
     assert availability["intent"] == "booking_availability_question"
     assert "варіант" in availability["reply_text"]
     assert "завтра" in availability["reply_text"]
@@ -1842,7 +1852,7 @@ async def test_after_hours_flowly_question_has_helpful_answer_and_soft_cta(proce
 
     assert result["intent"] == "after_hours_question"
     assert "бот може одразу відповісти" in result["reply_text"]
-    assert "коротко розібрати ваш процес" in result["reply_text"]
+    assert "спеціалістом" in result["reply_text"]
     assert result["booking_result"] is None
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
@@ -1878,7 +1888,8 @@ async def test_explicit_consultation_request_starts_booking(processor_factory):
     result = await processor.process(_message(text="давай консультацію"))
 
     assert result["intent"] == "booking_request"
-    assert result["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in result["reply_text"]
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -1899,7 +1910,8 @@ async def test_multi_turn_warm_lead_is_guided_to_consultation_without_pressure(p
     assert crm["intent"] == "capability_question"
     assert crm["routing_category"] == "consultation_soft_cta"
     assert "CRM можна підключити" in crm["reply_text"]
-    assert "прикинути під ваш кейс" in crm["reply_text"]
+    assert "спеціалістом" in crm["reply_text"]
+    assert "мінімальний сценарій" in crm["reply_text"]
 
     assert price["intent"] == "price"
     assert "старт від 200$" in price["reply_text"]
@@ -1982,7 +1994,8 @@ async def test_explicit_discuss_intent_starts_booking_but_crm_does_not(processor
     assert "CRM можна підключити" in crm["reply_text"]
     assert state_after_crm == "NONE"
     assert discuss["intent"] == "booking_request"
-    assert discuss["reply_text"] == "Підкажіть, будь ласка, точний день і час."
+    assert "спеціалістом" in discuss["reply_text"]
+    assert "день" in discuss["reply_text"] and "час" in discuss["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
 
 
@@ -2010,4 +2023,108 @@ async def test_skeptic_competitor_question_gets_specific_reply(processor_factory
     assert result["intent"] == "skepticism"
     assert "сценарії під ваш процес" in result["reply_text"]
     assert result["booking_result"] is None
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "мені це не зайде",
+        "ви просто продаєте повітря",
+        "таких ботів купа",
+    ],
+)
+async def test_aggressive_objection_does_not_fallback_or_start_booking(processor_factory, text):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text=text))
+
+    assert result["intent"] == "aggressive_objection"
+    assert "Розумію скепсис" in result["reply_text"]
+    assert "повторювані звернення" in result["reply_text"]
+    assert "Тут краще коротко уточнити деталі" not in result["reply_text"]
+    assert result["booking_result"] is None
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_multi_turn_complex_interest_gets_proactive_specialist_cta(processor_factory):
+    processor, booking_service = processor_factory()
+
+    telegram = await processor.process(_message(text="а в телеграмі працює?"))
+    crm = await processor.process(_message(text="CRM можна підключити?"))
+    night = await processor.process(_message(text="а якщо клієнти пишуть вночі?"))
+
+    assert telegram["intent"] == "capability_question"
+    assert crm["intent"] == "capability_question"
+    assert "спеціалістом" in crm["reply_text"]
+    assert night["intent"] == "after_hours_question"
+    assert "спеціалістом" in night["reply_text"]
+    assert "не відповідати загально" in night["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_direct_call_request_uses_natural_specialist_time_prompt(processor_factory):
+    processor, booking_service = processor_factory()
+
+    result = await processor.process(_message(text="давай дзвінок"))
+
+    assert result["intent"] == "booking_request"
+    assert result["booking_result"]["status"] == "waiting_for_time"
+    assert "спеціалістом" in result["reply_text"]
+    assert "який день" in result["reply_text"]
+    assert "приблизний час" in result["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_no_call_after_proactive_specialist_cta_is_respected(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="а в телеграмі працює?"))
+    cta = await processor.process(_message(text="CRM можна підключити?"))
+    no_call = await processor.process(_message(text="без дзвінка поясни"))
+
+    assert "спеціалістом" in cta["reply_text"]
+    assert no_call["intent"] == "more_details"
+    assert "можна без дзвінка" in no_call["reply_text"]
+    assert "спеціалістом" not in no_call["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_price_objection_after_proactive_cta_does_not_force_call(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="а в телеграмі працює?"))
+    await processor.process(_message(text="CRM можна підключити?"))
+    objection = await processor.process(_message(text="дорого"))
+
+    assert objection["intent"] == "general_question"
+    assert "мінімального сценарію" in objection["reply_text"]
+    assert "дзвін" not in objection["reply_text"].lower()
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_call_request_after_no_call_accepts_new_intent(processor_factory):
+    processor, booking_service = processor_factory()
+
+    no_call = await processor.process(_message(text="без дзвінка поясни"))
+    call = await processor.process(_message(text="давай дзвінок"))
+
+    assert no_call["intent"] == "more_details"
+    assert call["intent"] == "booking_request"
+    assert "спеціалістом" in call["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
+async def test_no_call_after_telegram_crm_night_sequence_stays_in_chat(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="а в телеграмі працює?"))
+    await processor.process(_message(text="CRM можна підключити?"))
+    night = await processor.process(_message(text="а якщо клієнти пишуть вночі?"))
+    no_call = await processor.process(_message(text="без дзвінка"))
+
+    assert "спеціалістом" in night["reply_text"]
+    assert no_call["intent"] == "more_details"
+    assert "можна без дзвінка" in no_call["reply_text"]
+    assert "спеціалістом" not in no_call["reply_text"]
     assert booking_service.get_booking_state("user-1").value == "NONE"

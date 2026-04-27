@@ -226,6 +226,19 @@ class IntentService:
             "херня",
         ]
 
+        aggressive_objection_markers = [
+            "мені це не зайде",
+            "це не для мене",
+            "ви продаєте повітря",
+            "продаєте повітря",
+            "просто повітря",
+            "фігня",
+            "фигня",
+            "не бачу сенсу",
+            "таких ботів купа",
+            "ботів купа",
+        ]
+
         hesitation_exact = [
             "може",
             "подумаю",
@@ -265,11 +278,13 @@ class IntentService:
             "що потрібно для старту",
         ]
 
-        # Priority: REJECTION > FRUSTRATED > HESITATION > BUYING_SIGNAL > START_REQUIREMENTS > PRICE > CHANNELS > INDUSTRIES > SERVICE_DESCRIPTION > USE_CASES > INTEREST > BOOKING > FALLBACK
+        # Priority: REJECTION > FRUSTRATED > AGGRESSIVE_OBJECTION > HESITATION > BUYING_SIGNAL > START_REQUIREMENTS > PRICE > CHANNELS > INDUSTRIES > SERVICE_DESCRIPTION > USE_CASES > INTEREST > BOOKING > FALLBACK
         if normalized in rejection_markers:
             intent = IntentType.REJECTION
         elif self._contains_any(normalized, frustrated_markers):
             intent = IntentType.FRUSTRATED
+        elif self._contains_any(normalized, aggressive_objection_markers):
+            intent = IntentType.AGGRESSIVE_OBJECTION
         elif normalized in hesitation_exact or self._contains_any(normalized, hesitation_markers):
             intent = IntentType.HESITATION
         elif self._contains_any(normalized, buying_signal_markers):

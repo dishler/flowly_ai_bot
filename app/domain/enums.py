@@ -10,6 +10,7 @@ class IntentType(str, Enum):
     INTEREST_SIGNAL = "interest_signal"
     REJECTION = "rejection"
     FRUSTRATED = "frustrated"
+    AGGRESSIVE_OBJECTION = "aggressive_objection"
     HESITATION = "hesitation"
     BUYING_SIGNAL = "buying_signal"
     START_REQUIREMENTS = "start_requirements"

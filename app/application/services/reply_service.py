@@ -65,6 +65,8 @@ class ReplyService:
                 return self._get_rejection_reply(language)
             if intent == IntentType.FRUSTRATED:
                 return self._get_frustrated_reply(language)
+            if intent == IntentType.AGGRESSIVE_OBJECTION:
+                return self._get_aggressive_objection_reply(language)
             return self._get_unknown_fallback_reply(language)
 
         if intent == IntentType.PRICE:
@@ -83,6 +85,8 @@ class ReplyService:
             return self._get_rejection_reply(language)
         if intent == IntentType.FRUSTRATED:
             return self._get_frustrated_reply(language)
+        if intent == IntentType.AGGRESSIVE_OBJECTION:
+            return self._get_aggressive_objection_reply(language)
         return self._get_unknown_fallback_reply(language)
 
     def get_escalation_reply(self, language: str) -> str:
@@ -298,6 +302,13 @@ class ReplyService:
             "що робить бот, для яких бізнесів підходить або скільки коштує."
         )
 
+    def _get_aggressive_objection_reply(self, language: str) -> str:
+        return (
+            "Розумію скепсис. Бот має сенс не просто як “чатик”, а коли є повторювані "
+            "звернення, заявки губляться або менеджери довго відповідають. Якщо у вас цього "
+            "немає — можливо, автоматизація справді не потрібна."
+        )
+
     def _get_industries_reply(self, language: str) -> str:
         return (
             "Найкраще бот підходить для сервісних бізнесів, де є багато вхідних повідомлень, "
@@ -317,8 +328,8 @@ class ReplyService:
         return (
             "Якщо клієнт пише вночі, бот може одразу відповісти, прийняти заявку, "
             "уточнити базові деталі й зібрати контакт. А вже зранку менеджер бачить "
-            "готове звернення і може швидко продовжити діалог. Якщо хочете, можемо "
-            "коротко розібрати ваш процес і підказати, як це краще автоматизувати."
+            "готове звернення і може швидко продовжити діалог. Тут уже краще коротко "
+            "розібрати ваш кейс зі спеціалістом, щоб не відповідати загально."
         )
 
     def _get_interest_signal_reply(self, language: str) -> str:
@@ -1171,6 +1182,9 @@ class ReplyService:
         if resolved_intent == IntentType.FRUSTRATED:
             return self._get_frustrated_reply(language)
 
+        if resolved_intent == IntentType.AGGRESSIVE_OBJECTION:
+            return self._get_aggressive_objection_reply(language)
+
         if resolved_intent == IntentType.HESITATION:
             return (
                 "Нормально, тут не треба вирішувати одразу. Бот має сенс, якщо є багато "
@@ -1181,14 +1195,16 @@ class ReplyService:
         if resolved_intent == IntentType.BUYING_SIGNAL:
             return (
                 "Супер, можемо допомогти. Почати можна з простого сценарію: напишіть, будь "
-                "ласка, який у вас бізнес і де зараз найбільше звернень?"
+                "ласка, який у вас бізнес і де зараз найбільше звернень? Тут уже можна "
+                "підібрати мінімальний сценарій під ваші канали й процес."
             )
 
         if resolved_intent == IntentType.START_REQUIREMENTS:
             return (
                 "Для старту потрібно зрозуміти 4 речі: де клієнти пишуть, які питання "
                 "повторюються, що треба збирати в заявці і куди передавати заявки. Після "
-                "цього можна скласти перший сценарій бота."
+                "цього можна скласти перший сценарій бота. Тут уже краще коротко розібрати "
+                "ваш кейс зі спеціалістом, щоб не відповідати загально."
             )
 
         if resolved_intent in {IntentType.CONSULTATION_INTEREST, IntentType.BOOKING_REQUEST}:
