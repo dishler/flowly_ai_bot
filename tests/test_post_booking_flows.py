@@ -1253,6 +1253,45 @@ async def test_manual_intro_details_channel_and_explain_flow_stays_contextual(pr
     assert explain["routing_category"] != "escalate_to_human"
 
 
+async def test_price_instagram_short_replies_and_bot_question_stay_contextual(processor_factory):
+    processor, booking_service = processor_factory()
+
+    price = await processor.process(_message(text="ціна"))
+    channel = await processor.process(_message(text="інстаграм"))
+    yes = await processor.process(_message(text="так"))
+    uhuh = await processor.process(_message(text="угу"))
+    identity = await processor.process(_message(text="ти бот?"))
+
+    assert price["intent"] == "price"
+    assert "старт від 200$" in price["reply_text"]
+    assert channel["intent"] == "channel_context_followup"
+    assert "починати саме з Instagram" in channel["reply_text"]
+    assert "Що найчастіше пишуть клієнти" in channel["reply_text"]
+    assert yes["intent"] == "contextual_affirmation"
+    assert "для Instagram логічно почати" in yes["reply_text"]
+    assert uhuh["intent"] == "contextual_affirmation"
+    assert "найпростішого Instagram-сценарію" in uhuh["reply_text"]
+    assert identity["intent"] == "bot_identity_question"
+    assert "AI-асистент Flowly" in identity["reply_text"]
+    assert "Хочу правильно зрозуміти" not in channel["reply_text"]
+    assert "Тут краще коротко уточнити" not in yes["reply_text"]
+    assert "Тут краще коротко уточнити" not in uhuh["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_repeated_fallback_uses_context_instead_of_looping(processor_factory):
+    processor, _ = processor_factory()
+
+    await processor.process(_message(text="ціна"))
+    await processor.process(_message(text="інстаграм"))
+    first_unclear = await processor.process(_message(text="???"))
+    second_unclear = await processor.process(_message(text="???"))
+
+    assert "Хочу правильно зрозуміти" in first_unclear["reply_text"]
+    assert "Хочу правильно зрозуміти" not in second_unclear["reply_text"]
+    assert "як це працює саме для Instagram" in second_unclear["reply_text"]
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -1436,12 +1475,16 @@ async def test_safe_fallback_varies_for_short_unclear_replies(processor_factory)
     processor, booking_service = processor_factory()
 
     unclear = await processor.process(_message(text="?????"))
+    acknowledged = await processor.process(_message(text="Зрозуміло"))
     weak = await processor.process(_message(text="ну це таке"))
     agree = await processor.process(_message(text="ага"))
     relevant = await processor.process(_message(text="актуально"))
     maybe = await processor.process(_message(text="можливо"))
 
     assert "Хочу правильно зрозуміти" in unclear["reply_text"]
+    assert acknowledged["intent"] == "contextual_short_reply"
+    assert "можу коротко зорієнтувати" in acknowledged["reply_text"]
+    assert "Хочу правильно зрозуміти" not in acknowledged["reply_text"]
     assert weak["intent"] == "contextual_short_reply"
     assert "не дуже переконливо" in weak["reply_text"]
     assert agree["intent"] == "contextual_short_reply"

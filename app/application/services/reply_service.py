@@ -146,6 +146,37 @@ class ReplyService:
     def get_safe_fallback_reply(self, language: str) -> str:
         return self._get_unknown_fallback_reply(language)
 
+    def get_contextual_fallback_reply(self, user_text: str, history: List[str], language: str) -> str:
+        _ = user_text
+        assistant_history = [
+            item.removeprefix("assistant:").strip().lower()
+            for item in history
+            if item.startswith("assistant:")
+        ]
+        recent = " ".join(assistant_history[-4:])
+
+        if "instagram" in recent or "інстаграм" in recent:
+            return (
+                "Можу детальніше пояснити, як це працює саме для Instagram: бот відповідає в DM, "
+                "уточнює запит, збирає контакт або бажаний час і передає команді вже готовішу заявку. "
+                "Що у вас частіше пишуть в Instagram: ціни, запис чи питання по послугах?"
+            )
+
+        if "старт від 200" in recent or "вартість стартує" in recent:
+            return (
+                "По ціні орієнтир лишається від 200$, але точніше залежить від каналу, сценарію "
+                "і того, що саме бот має робити. Напишіть, будь ласка, з якого каналу хочете почати."
+            )
+
+        if "ai-бот" in recent or "бот відповідає" in recent:
+            return (
+                "Якщо коротко по суті: бот бере перші типові повідомлення, уточнює деталі "
+                "і передає менеджеру вже теплішу заявку. Найпростіше розібрати на вашому каналі: "
+                "де зараз найбільше звернень?"
+            )
+
+        return self._get_unknown_fallback_reply(language)
+
     def get_language_request_reply(self, language: str) -> str:
         return "Можу відповідати українською або англійською."
 

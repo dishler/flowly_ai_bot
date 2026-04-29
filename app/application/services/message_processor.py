@@ -298,6 +298,29 @@ class MessageProcessor:
             return True
         return not bool(re.search(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9]", stripped))
 
+    def _looks_like_bot_identity_question(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "ти бот",
+            "ти робот",
+            "це бот",
+            "це робот",
+            "ви бот",
+            "ви робот",
+            "з ботом спілкуюсь",
+            "з роботом спілкуюсь",
+            "are you a bot",
+            "is this a bot",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _get_bot_identity_reply(self) -> str:
+        return (
+            "Я AI-асистент Flowly, але відповідаю по суті задачі, не як форма 🙂 "
+            "Можу пояснити сценарій для вашого каналу і передати команді, якщо захочете "
+            "розібрати кейс детальніше."
+        )
+
     def _looks_like_product_question_during_booking(self, text: str) -> bool:
         normalized = self._normalize_for_conversation_matching(text)
         product_markers = [
@@ -921,6 +944,7 @@ class MessageProcessor:
             user_text=message.user_message,
             intent=intent_for_policy,
         )
+        reply_text = self._decycle_fallback_if_needed(message.sender_id, message.user_message, reply_text)
         reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
         self.memory_service.add_assistant_message(message.sender_id, reply_text)
         outbound_result = self.outbound_service.send_reply(
@@ -950,6 +974,10 @@ class MessageProcessor:
             "ок": "Дякую, зафіксував.",
             "окей": "Дякую, зафіксував.",
             "добре": "Добре, дякую.",
+            "зрозуміло": "Добре. Якщо буде актуально, можу коротко зорієнтувати: як працює бот, для яких бізнесів підходить або скільки коштує.",
+            "ясно": "Добре. Якщо буде актуально, можу коротко зорієнтувати: як працює бот, для яких бізнесів підходить або скільки коштує.",
+            "поняв": "Добре. Якщо буде актуально, можу коротко зорієнтувати: як працює бот, для яких бізнесів підходить або скільки коштує.",
+            "поняла": "Добре. Якщо буде актуально, можу коротко зорієнтувати: як працює бот, для яких бізнесів підходить або скільки коштує.",
             "давай": "Добре, підкажіть, будь ласка, що саме вам зручно обговорити?",
             "давайте": "Добре, тоді почнемо з контексту: який у вас бізнес і де зараз найбільше звернень?",
             "так давай": "Добре, тоді почнемо з контексту: який у вас бізнес і де зараз найбільше звернень?",
@@ -980,6 +1008,64 @@ class MessageProcessor:
             "це не питання це пропозиція": "Дякую, зафіксував. Передам це команді, щоб подивилися уважно.",
         }
         return replies.get(normalized)
+
+    def _is_short_affirmation(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        normalized = re.sub(r"[.!?…]+$", "", normalized).strip()
+        affirmations = {
+            "так",
+            "угу",
+            "ага",
+            "ок",
+            "окк",
+            "окей",
+            "добре",
+            "yes",
+            "yep",
+            "yeah",
+        }
+        return normalized in affirmations
+
+    def _get_contextual_affirmation_reply(self, sender_id: str) -> str | None:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        assistant_items = [
+            item.removeprefix("assistant:").strip().lower()
+            for item in previous_items
+            if item.startswith("assistant:")
+        ]
+        recent = " ".join(assistant_items[-4:])
+
+        if "що хочете автоматизувати першим" in recent:
+            return (
+                "Ок, тоді я б почав з найпростішого Instagram-сценарію: часті питання, "
+                "уточнення запиту і передача контакту менеджеру. Щоб сказати точніше, "
+                "який у вас бізнес і що найчастіше питають клієнти?"
+            )
+
+        if "що найчастіше пишуть клієнти" in recent or "ціни, запис" in recent:
+            return (
+                "Супер. Тоді для Instagram логічно почати з простого сценарію: відповіді на часті "
+                "питання, уточнення запиту і збір контакту або бажаного часу. Що хочете "
+                "автоматизувати першим: ціни, запис чи первинну консультацію?"
+            )
+
+        if "які канали потрібні" in recent or "з якого каналу" in recent:
+            return (
+                "Ок. Якщо стартуємо з Instagram, бот може відповідати в DM, уточнювати запит "
+                "і збирати контакт або бажаний час. Що найчастіше питають клієнти в Instagram?"
+            )
+
+        if "чи актуально розглянути впровадження" in recent:
+            return self._get_interest_acceptance_followup_reply()
+
+        if "коротко підкажу" in recent or "як це може працювати" in recent:
+            return (
+                "Супер. Тоді найкраще прив’язатися до вашого процесу: який у вас бізнес "
+                "і де зараз найбільше звернень?"
+            )
+
+        return None
 
     def _get_last_assistant_message(self, sender_id: str) -> str | None:
         for item in reversed(self.memory_service.get_history(sender_id)):
@@ -1028,6 +1114,27 @@ class MessageProcessor:
             )
 
         return reply_text
+
+    def _looks_like_generic_fallback(self, reply_text: str) -> bool:
+        normalized = reply_text.lower()
+        return (
+            "хочу правильно зрозуміти ваш запит" in normalized
+            or "тут краще коротко уточнити деталі" in normalized
+            or "можете написати, що саме цікавить" in normalized
+        )
+
+    def _has_recent_generic_fallback(self, sender_id: str) -> bool:
+        last_reply = self._get_last_assistant_message(sender_id)
+        return bool(last_reply and self._looks_like_generic_fallback(last_reply))
+
+    def _decycle_fallback_if_needed(self, sender_id: str, user_text: str, reply_text: str) -> str:
+        if not self._looks_like_generic_fallback(reply_text):
+            return reply_text
+        if not self._has_recent_generic_fallback(sender_id):
+            return reply_text
+        language = self.reply_service.detect_user_language(user_text)
+        history = self.memory_service.get_history(sender_id)
+        return self.reply_service.get_contextual_fallback_reply(user_text, history, language)
 
     def _has_recent_interest_signal_reply(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
@@ -1206,6 +1313,8 @@ class MessageProcessor:
             "де зараз найбільше звернень",
             "каналу, де у вас найбільше звернень",
             "instagram, telegram, whatsapp чи viber",
+            "які канали потрібні",
+            "з якого каналу",
         ]
         for item in reversed(previous_items[-4:]):
             if not item.startswith("assistant:"):
@@ -1217,6 +1326,8 @@ class MessageProcessor:
 
     def _get_channel_context_followup_reply(self, text: str) -> str | None:
         normalized = self._normalize_for_conversation_matching(text)
+        if "?" in text or any(marker in normalized for marker in ["тільки", "только", "only", "підтрим", "працюєте"]):
+            return None
         channel_replies = [
             (["instagram", "інстаграм", "інсту", "інста"], "Instagram"),
             (["telegram", "телеграм", "телега", "телезі"], "Telegram"),
@@ -1649,6 +1760,7 @@ class MessageProcessor:
                 user_text=message.user_message,
                 intent=IntentType.BOOKING_REQUEST,
             )
+            reply_text = self._decycle_fallback_if_needed(message.sender_id, message.user_message, reply_text)
             reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
             logger.info("Reply after guard: %s", reply_text)
 
@@ -1694,6 +1806,15 @@ class MessageProcessor:
                 reply_text=self.reply_service.get_safe_fallback_reply(language),
                 intent_value="general_question",
                 routing_category="safe_handoff",
+                intent_for_policy=IntentType.GENERAL_QUESTION,
+            )
+
+        if self._looks_like_bot_identity_question(message.user_message):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_bot_identity_reply(),
+                intent_value="bot_identity_question",
+                routing_category="answered_basic",
                 intent_for_policy=IntentType.GENERAL_QUESTION,
             )
 
@@ -1861,6 +1982,17 @@ class MessageProcessor:
                 routing_category="answered_basic",
                 intent_for_policy=IntentType.GENERAL_QUESTION,
             )
+
+        if self._is_short_affirmation(message.user_message):
+            contextual_affirmation_reply = self._get_contextual_affirmation_reply(message.sender_id)
+            if contextual_affirmation_reply:
+                return self._build_direct_reply_result(
+                    message=message,
+                    reply_text=contextual_affirmation_reply,
+                    intent_value="contextual_affirmation",
+                    routing_category="answered_basic",
+                    intent_for_policy=IntentType.GENERAL_QUESTION,
+                )
 
         contextual_short_reply = self._get_contextual_short_reply(message.user_message)
         if contextual_short_reply:
@@ -2044,6 +2176,7 @@ class MessageProcessor:
             user_text=message.user_message,
             intent=intent,
         )
+        reply_text = self._decycle_fallback_if_needed(message.sender_id, message.user_message, reply_text)
         reply_text = self._avoid_exact_repeat(message.sender_id, reply_text)
         if booking_result is None and routing_category != "safe_handoff":
             reply_text = self._finalize_general_reply_text(
