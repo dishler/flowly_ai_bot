@@ -429,6 +429,19 @@ async def test_business_details_after_price_prompt_call_not_slots(processor_fact
     assert "Можемо запропонувати кілька варіантів" not in detail_result["reply_text"]
 
 
+async def test_ok_davaite_after_price_followup_cta_starts_booking(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="Скільки коштує бот?"))
+    await processor.process(_message(text="у мене СТО, треба відповідати клієнтам"))
+    result = await processor.process(_message(text="ок давайте"))
+
+    assert result["intent"] == "booking_request"
+    assert "день" in result["reply_text"] and "час" in result["reply_text"]
+    assert result["routing_category"] == "consultation_cta"
+    assert booking_service.get_booking_state("user-1").value == "WAITING_FOR_TIME"
+
+
 async def test_channel_question_after_price_stays_channel_answer(processor_factory):
     processor, _ = processor_factory()
 
@@ -949,6 +962,22 @@ async def test_price_objection_has_no_aggressive_call_cta(processor_factory):
     assert "дзвін" not in objection["reply_text"].lower()
     assert accepted["intent"] == "contextual_short_reply"
     assert "який у вас бізнес" in accepted["reply_text"]
+    assert booking_service.get_booking_state("user-1").value == "NONE"
+
+
+async def test_price_objection_nu_ok_keeps_human_context_followup(processor_factory):
+    processor, booking_service = processor_factory()
+
+    await processor.process(_message(text="що це за сервіс?"))
+    await processor.process(_message(text="поясни без дзвінка"))
+    await processor.process(_message(text="а скільки коштує?"))
+    await processor.process(_message(text="дорого"))
+    result = await processor.process(_message(text="ну ок"))
+
+    assert result["intent"] == "contextual_short_reply"
+    assert "який у вас бізнес" in result["reply_text"]
+    assert result["routing_category"] != "safe_handoff"
+    assert result["routing_category"] != "escalate_to_human"
     assert booking_service.get_booking_state("user-1").value == "NONE"
 
 
