@@ -1170,7 +1170,7 @@ async def test_service_question_what_does_your_bot_do_returns_explanation_not_ct
     assert result["intent"] == "service_description"
     assert result["routing_category"] == "answered_basic"
     assert "Ми налаштовуємо AI-бота для Instagram/Facebook/Telegram/WhatsApp/Viber." in result["reply_text"]
-    assert "Актуально розглядаєте впровадження" in result["reply_text"]
+    assert "Чи актуально розглянути впровадження" in result["reply_text"]
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
 
 
@@ -1217,6 +1217,40 @@ async def test_common_first_service_questions_do_not_use_ai_fallback(processor_f
     assert "уточніть" not in result["reply_text"].lower()
     assert ("AI-бот" in result["reply_text"] or "AI-ботів" in result["reply_text"])
     assert not ai_service.calls
+
+
+async def test_greeting_then_service_question_does_not_repeat_intro(processor_factory):
+    processor, _ = processor_factory()
+
+    greeting = await processor.process(_message(text="Привіт"))
+    service = await processor.process(_message(text="Чим ви займаєтесь?"))
+
+    assert "Привіт!" in greeting["reply_text"]
+    assert service["intent"] == "service_followup"
+    assert "По суті, ми автоматизуємо переписки" in service["reply_text"]
+    assert "Привіт!" not in service["reply_text"]
+    assert service["reply_text"] != greeting["reply_text"]
+
+
+async def test_manual_intro_details_channel_and_explain_flow_stays_contextual(processor_factory):
+    processor, _ = processor_factory()
+
+    await processor.process(_message(text="Привіт"))
+    service = await processor.process(_message(text="Чим ви займаєтесь?"))
+    details = await processor.process(_message(text="Цікаво, розкжи детальніше"))
+    channel = await processor.process(_message(text="Instagram"))
+    explain = await processor.process(_message(text="поясни ти ж написав"))
+
+    assert service["intent"] == "service_followup"
+    assert details["intent"] == "more_details"
+    assert "можна без дзвінка" not in details["reply_text"]
+    assert "каналу, де у вас найбільше звернень" in details["reply_text"]
+    assert channel["intent"] == "channel_context_followup"
+    assert "починати саме з Instagram" in channel["reply_text"]
+    assert "Зараз ми фокусуємось" not in channel["reply_text"]
+    assert explain["intent"] == "more_details"
+    assert explain["routing_category"] != "safe_handoff"
+    assert explain["routing_category"] != "escalate_to_human"
 
 
 @pytest.mark.parametrize(
@@ -1274,7 +1308,7 @@ async def test_interest_signal_returns_soft_call_cta(processor_factory):
     assert result["intent"] == "interest_signal"
     assert result["routing_category"] == "consultation_cta"
     assert not result["reply_text"].startswith("Привіт!")
-    assert "Актуально розглядаєте впровадження" in result["reply_text"]
+    assert "Чи актуально розглянути впровадження" in result["reply_text"]
     assert result["booking_result"] is None
 
 
@@ -1305,7 +1339,7 @@ async def test_interest_signal_does_not_use_generic_cta(processor_factory):
 
     assert result["intent"] == "interest_signal"
     assert FORBIDDEN_GENERIC_CTA not in result["reply_text"]
-    assert "Актуально розглядаєте впровадження" in result["reply_text"]
+    assert "Чи актуально розглянути впровадження" in result["reply_text"]
 
 
 async def test_interest_signal_acceptance_asks_for_business_context(processor_factory):
@@ -1327,7 +1361,7 @@ async def test_service_intro_then_interest_asks_business_context_not_booking(pro
     interest = await processor.process(_message(text="Цікаво"))
     niche = await processor.process(_message(text="а в мене салон краси, як це працюватиме для нас?"))
 
-    assert "Актуально розглядаєте впровадження" in intro["reply_text"]
+    assert "Чи актуально розглянути впровадження" in intro["reply_text"]
     assert interest["intent"] == "interest_followup"
     assert "Для якого бізнесу" in interest["reply_text"]
     assert interest["booking_result"] is None
@@ -1344,7 +1378,7 @@ async def test_live_interest_details_and_business_context_dm_flow(processor_fact
     actual = await processor.process(_message(text="так актуально"))
     details = await processor.process(_message(text="спочатку хочу більше деталей"))
 
-    assert "Актуально розглядаєте впровадження" in intro["reply_text"]
+    assert "Чи актуально розглянути впровадження" in intro["reply_text"]
     assert actual["intent"] == "interest_followup"
     assert "Для якого бізнесу" in actual["reply_text"]
     assert actual["booking_result"] is None
@@ -1648,7 +1682,7 @@ async def test_manual_negative_dialogue_has_no_forbidden_generic_cta(processor_f
         transcript.append((text, result["reply_text"]))
 
     assert "Ми налаштовуємо AI-бота для Instagram/Facebook/Telegram/WhatsApp/Viber." in transcript[0][1]
-    assert "Актуально розглядаєте впровадження" in transcript[0][1]
+    assert "Чи актуально розглянути впровадження" in transcript[0][1]
     assert "Найкраще бот підходить для сервісних бізнесів" in transcript[1][1]
     assert transcript[2][1].startswith("Зрозумів, дякую.")
     assert transcript[3][1] == "Добре, зрозумів."

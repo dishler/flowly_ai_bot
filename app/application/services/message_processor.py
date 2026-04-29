@@ -826,7 +826,10 @@ class MessageProcessor:
             if not item.startswith("assistant:"):
                 continue
             normalized = item.lower()
-            if "актуально розглядаєте впровадження" in normalized:
+            if (
+                "актуально розглядаєте впровадження" in normalized
+                or "актуально розглянути впровадження" in normalized
+            ):
                 return True
         return False
 
@@ -1124,7 +1127,11 @@ class MessageProcessor:
             "більше деталей",
             "детальніше",
             "більше детально",
+            "розкажи детальніше",
+            "розкажіть детальніше",
             "просто пояснити",
+            "поясни ти ж",
+            "поясни що ти",
             "пояснити без дзвінка",
             "без дзвінка",
             "без дзвонка",
@@ -1144,12 +1151,41 @@ class MessageProcessor:
         ]
         return any(marker in normalized for marker in markers)
 
-    def _get_more_details_reply(self) -> str:
+    def _wants_no_call_explanation(self, text: str) -> bool:
+        normalized = self._normalize_for_conversation_matching(text)
+        markers = [
+            "без дзвінка",
+            "без дзвонка",
+            "не хочу дзвінок",
+            "не хочу дзвонок",
+            "не хочу консультацію",
+            "пояснити без дзвінка",
+            "пояснити без",
+            "в тексті",
+            "текстом",
+            "поясни тут",
+            "поясніть тут",
+            "давайте тут",
+            "спочатку хочу більше",
+            "спершу зрозуміти",
+            "спочатку зрозуміти",
+            "хочу спершу зрозуміти",
+            "хочу спочатку зрозуміти",
+        ]
+        return any(marker in normalized for marker in markers)
+
+    def _get_more_details_reply(self, text: str = "") -> str:
+        if self._wants_no_call_explanation(text):
+            return (
+                "Так, звісно, можна без дзвінка. Якщо коротко: бот бере типові повідомлення "
+                "в месенджерах, відповідає клієнтам, уточнює потрібні деталі й передає вже "
+                "готову заявку або веде до запису. Щоб пояснити точніше, який у вас бізнес "
+                "і де зараз найбільше звернень: Instagram, Telegram, WhatsApp чи Viber?"
+            )
         return (
-            "Так, звісно, можна без дзвінка. Якщо коротко: бот бере типові повідомлення "
-            "в месенджерах, відповідає клієнтам, уточнює потрібні деталі й передає вже "
-            "готову заявку або веде до запису. Щоб пояснити точніше, який у вас бізнес "
-            "і де зараз найбільше звернень: Instagram, Telegram, WhatsApp чи Viber?"
+            "Якщо детальніше: бот відповідає на типові повідомлення, уточнює запит, "
+            "збирає контакт або бажаний час і передає команді вже теплішу заявку. "
+            "Найкраще почати з каналу, де у вас найбільше звернень: Instagram, Telegram, WhatsApp чи Viber?"
         )
 
     def _has_recent_intro_offer(self, sender_id: str) -> bool:
@@ -1162,6 +1198,46 @@ class MessageProcessor:
             if "коротко підкажу, як це може працювати" in normalized:
                 return True
         return False
+
+    def _has_recent_channel_context_question(self, sender_id: str) -> bool:
+        history = self.memory_service.get_history(sender_id)
+        previous_items = history[:-1]
+        markers = [
+            "де зараз найбільше звернень",
+            "каналу, де у вас найбільше звернень",
+            "instagram, telegram, whatsapp чи viber",
+        ]
+        for item in reversed(previous_items[-4:]):
+            if not item.startswith("assistant:"):
+                continue
+            normalized = item.lower()
+            if any(marker in normalized for marker in markers):
+                return True
+        return False
+
+    def _get_channel_context_followup_reply(self, text: str) -> str | None:
+        normalized = self._normalize_for_conversation_matching(text)
+        channel_replies = [
+            (["instagram", "інстаграм", "інсту", "інста"], "Instagram"),
+            (["telegram", "телеграм", "телега", "телезі"], "Telegram"),
+            (["whatsapp", "ватсап", "вотсап"], "WhatsApp"),
+            (["viber", "вайбер"], "Viber"),
+        ]
+        for markers, channel in channel_replies:
+            if any(marker in normalized for marker in markers):
+                return (
+                    f"Ок, тоді можна починати саме з {channel}. Бот може забрати першу лінію: "
+                    "відповідати на типові питання, уточнювати запит і збирати контакт або бажаний час. "
+                    "Що найчастіше пишуть клієнти в цьому каналі?"
+                )
+        return None
+
+    def _get_intro_followup_service_reply(self) -> str:
+        return (
+            "По суті, ми автоматизуємо переписки в месенджерах: бот відповідає на типові питання, "
+            "уточнює запит, збирає контакт і допомагає довести людину до запису. "
+            "Найчастіше це потрібно, коли багато звернень губиться або команда довго відповідає."
+        )
 
     def _has_recent_niche_reply(self, sender_id: str) -> bool:
         history = self.memory_service.get_history(sender_id)
@@ -1652,10 +1728,21 @@ class MessageProcessor:
                 routing_category="answered_basic",
             )
 
+        if self._has_recent_channel_context_question(message.sender_id):
+            channel_context_reply = self._get_channel_context_followup_reply(message.user_message)
+            if channel_context_reply:
+                return self._build_direct_reply_result(
+                    message=message,
+                    reply_text=channel_context_reply,
+                    intent_value="channel_context_followup",
+                    routing_category="answered_basic",
+                    intent_for_policy=IntentType.GENERAL_QUESTION,
+                )
+
         if self._looks_like_more_details_request(message.user_message):
             return self._build_direct_reply_result(
                 message=message,
-                reply_text=self._get_more_details_reply(),
+                reply_text=self._get_more_details_reply(message.user_message),
                 intent_value="more_details",
                 routing_category="answered_basic",
                 intent_for_policy=IntentType.GENERAL_QUESTION,
@@ -1663,6 +1750,18 @@ class MessageProcessor:
 
         if self._looks_like_capability_question(message.user_message):
             return self._build_capability_question_result(message)
+
+        if (
+            self._has_recent_intro_offer(message.sender_id)
+            and self.intent_service.detect_intent(message.user_message) == IntentType.SERVICE_DESCRIPTION
+        ):
+            return self._build_direct_reply_result(
+                message=message,
+                reply_text=self._get_intro_followup_service_reply(),
+                intent_value="service_followup",
+                routing_category="answered_basic",
+                intent_for_policy=IntentType.SERVICE_DESCRIPTION,
+            )
 
         if (
             self._has_recent_soft_call_cta(message.sender_id)
